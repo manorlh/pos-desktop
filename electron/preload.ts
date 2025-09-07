@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   showMessageBox: (options: any) => ipcRenderer.invoke('show-message-box', options),
+  
+  // Printer functions
+  getPrinters: () => ipcRenderer.invoke('get-printers'),
+  printTest: (printerName: string) => ipcRenderer.invoke('print-test', printerName),
+  showPrintPreview: (printerName: string) => ipcRenderer.invoke('show-print-preview', printerName),
+  
   onMenuNewSale: (callback: () => void) => {
     ipcRenderer.on('menu-new-sale', callback);
   },

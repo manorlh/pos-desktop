@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { POSView } from '../pos/POSView';
 import { TransactionHistory } from '../transactions/TransactionHistory';
+import { PrinterTest } from '../test/PrinterTest';
 import type { ViewType } from '@/types/layout';
 
 export function MainLayout() {
@@ -16,6 +17,8 @@ export function MainLayout() {
         return <TransactionHistory />;
       case 'products':
         return <div className="p-6">Products Management (Coming Soon)</div>;
+      case 'test':
+        return <PrinterTest />;
       case 'settings':
         return <div className="p-6">Settings (Coming Soon)</div>;
       default:

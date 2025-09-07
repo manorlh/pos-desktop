@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Transaction, PaymentMethod, PaymentDetails, Cart, Customer, User } from '../types/index';
+import { generateUUID } from '../utils/uuid';
 
 interface TransactionStore {
   transactions: Transaction[];
@@ -35,7 +36,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     }
 
     const transaction: Transaction = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       transactionNumber: generateTransactionNumber(),
       cart,
       customer,

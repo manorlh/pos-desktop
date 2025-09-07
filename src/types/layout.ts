@@ -1,1 +1,1 @@
-export type ViewType = 'pos' | 'transactions' | 'products' | 'settings';
+export type ViewType = 'pos' | 'transactions' | 'products' | 'settings' | 'test';

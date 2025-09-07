@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Cart, CartItem, Product } from '../types/index';
+import { generateUUID } from '../utils/uuid';
 
 interface CartStore {
   cart: Cart;
@@ -14,7 +15,7 @@ interface CartStore {
 const TAX_RATE = 0.08; // 8% tax rate
 
 const createEmptyCart = (): Cart => ({
-  id: crypto.randomUUID(),
+  id: generateUUID(),
   items: [],
   subtotal: 0,
   taxAmount: 0,
@@ -53,7 +54,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
     } else {
       // Add new item
       const newItem: CartItem = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         productId: product.id,
         product,
         quantity,

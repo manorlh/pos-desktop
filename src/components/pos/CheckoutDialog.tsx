@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CreditCard, DollarSign, Smartphone, Check } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
+import { generateUUID } from '@/utils/uuid';
 import { 
   Dialog, 
   DialogContent, 
@@ -54,7 +55,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         amount: cart.totalAmount,
         amountTendered: selectedPaymentMethod.type === 'cash' ? parseFloat(amountTendered) : cart.totalAmount,
         changeAmount: changeAmount,
-        transactionId: crypto.randomUUID(),
+        transactionId: generateUUID(),
       };
 
       await addTransaction(cart, paymentDetails);

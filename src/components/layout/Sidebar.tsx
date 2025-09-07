@@ -3,7 +3,8 @@ import {
   Receipt, 
   Package, 
   Settings, 
-  Store 
+  Store,
+  TestTube
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -18,6 +19,7 @@ const navigation = [
   { id: 'pos' as ViewType, name: 'Point of Sale', icon: ShoppingCart },
   { id: 'transactions' as ViewType, name: 'Transactions', icon: Receipt },
   { id: 'products' as ViewType, name: 'Products', icon: Package },
+  { id: 'test' as ViewType, name: 'Printer Test', icon: TestTube },
   { id: 'settings' as ViewType, name: 'Settings', icon: Settings },
 ];
 
