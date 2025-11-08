@@ -13,6 +13,23 @@ interface PrintResult {
   error?: string;
 }
 
+interface TaxReportOptions {
+  transactions: any[];
+  businessInfo: any;
+  softwareInfo: any;
+  taxReportConfig: any;
+  dateRange: { start: Date; end: Date } | { year: number };
+  drive: string;
+  useCustomPath?: boolean;
+}
+
+interface TaxReportResult {
+  success: boolean;
+  filePath?: string;
+  recordCounts?: Record<string, number>;
+  error?: string;
+}
+
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
@@ -21,6 +38,12 @@ interface ElectronAPI {
   getPrinters: () => Promise<Printer[]>;
   printTest: (printerName: string) => Promise<PrintResult>;
   showPrintPreview: (printerName: string) => Promise<PrintResult>;
+  
+  // Tax Report functions
+  getAvailableDrives: () => Promise<string[]>;
+  selectExportDirectory: () => Promise<string | null>;
+  generateTaxReport: (options: TaxReportOptions) => Promise<TaxReportResult>;
+  printReportSummary: (summary: any) => Promise<PrintResult>;
   
   onMenuNewSale: (callback: () => void) => void;
   onMainProcessMessage: (callback: (message: string) => void) => void;

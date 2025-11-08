@@ -37,6 +37,9 @@ export interface CartItem {
   discount?: number;
   discountType?: 'percentage' | 'fixed';
   notes?: string;
+  // Tax Authority fields
+  transactionType?: 1 | 2 | 3; // 1=Service, 2=Sale (Macher), 3=Service+Sale
+  lineDiscount?: number; // Negative sign for discounts
 }
 
 export interface Cart {
@@ -83,6 +86,12 @@ export interface Transaction {
   cashier: User;
   createdAt: Date;
   updatedAt: Date;
+  // Tax Authority fields
+  documentType: number; // 305 for invoice, 400 for receipt
+  documentProductionDate: Date; // System-determined, cannot be changed
+  branchId?: string; // 7 characters, conditional if hasBranches=true
+  documentDiscount?: number; // Negative sign for discounts
+  whtDeduction?: number; // Positive sign, for receipts only (Withholding Tax)
 }
 
 export interface PaymentMethod {
@@ -101,6 +110,9 @@ export interface PaymentDetails {
   cardType?: string;
   authorizationCode?: string;
   transactionId?: string;
+  // Tax Authority fields
+  bankNumber?: string; // For checks (10 digits)
+  creditTransactionType?: 1 | 2 | 3 | 4; // For credit cards: 1=Regular, 2=Installments, 3=Credit, 4=Deferred Charge
 }
 
 export interface User {

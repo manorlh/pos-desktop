@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   printTest: (printerName: string) => ipcRenderer.invoke('print-test', printerName),
   showPrintPreview: (printerName: string) => ipcRenderer.invoke('show-print-preview', printerName),
   
+  // Tax Report functions
+  getAvailableDrives: () => ipcRenderer.invoke('get-available-drives'),
+  selectExportDirectory: () => ipcRenderer.invoke('select-export-directory'),
+  generateTaxReport: (options: any) => ipcRenderer.invoke('generate-tax-report', options),
+  printReportSummary: (summary: any) => ipcRenderer.invoke('print-report-summary', summary),
+  
   onMenuNewSale: (callback: () => void) => {
     ipcRenderer.on('menu-new-sale', callback);
   },

@@ -1,0 +1,31 @@
+{
+  "businessInfo": {
+    "vatNumber": "123456789",
+    "companyName": "My Company Ltd",
+    "companyAddress": "Main Street",
+    "companyAddressNumber": "123",
+    "companyCity": "Tel Aviv",
+    "companyZip": "12345",
+    "companyRegNumber": "000000001",
+    "hasBranches": false,
+    "branchId": ""
+  },
+  "softwareInfo": {
+    "registrationNumber": "00000001",
+    "name": "POS Desktop",
+    "version": "0.0.0",
+    "manufacturerId": "987654321",
+    "manufacturerName": "Developer Name",
+    "softwareType": "multi-year"
+  },
+  "taxReportConfig": {
+    "accountingType": "1",
+    "balancingRequired": true,
+    "languageCode": "0",
+    "charset": "1",
+    "defaultCurrency": "ILS",
+    "compressionSoftware": "zip",
+    "systemCode": "&OF1.31&"
+  }
+}
+

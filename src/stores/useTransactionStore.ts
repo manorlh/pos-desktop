@@ -13,6 +13,7 @@ interface TransactionStore {
   ) => Promise<Transaction>;
   getTransactionById: (id: string) => Transaction | undefined;
   getTransactionsByDate: (date: Date) => Transaction[];
+  getTransactionsByDateRange: (startDate: Date, endDate: Date) => Transaction[];
   getTodaysTransactions: () => Transaction[];
   setPaymentMethods: (methods: PaymentMethod[]) => void;
   setCurrentUser: (user: User) => void;
@@ -35,6 +36,11 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       throw new Error('No user logged in');
     }
 
+    const now = new Date();
+    
+    // Determine document type: 305 for invoice (with customer), 400 for receipt (no customer)
+    const documentType = customer ? 305 : 400;
+
     const transaction: Transaction = {
       id: generateUUID(),
       transactionNumber: generateTransactionNumber(),
@@ -44,8 +50,13 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       paymentDetails,
       status: 'completed',
       cashier: currentUser,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
+      // Tax Authority fields
+      documentType,
+      documentProductionDate: now, // System-determined
+      documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
+      // branchId and whtDeduction can be set later if needed
     };
 
     set({
@@ -71,6 +82,20 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     return transactions.filter(transaction => {
       const transactionDate = new Date(transaction.createdAt);
       return transactionDate >= targetDate && transactionDate < nextDate;
+    });
+  },
+
+  getTransactionsByDateRange: (startDate: Date, endDate: Date) => {
+    const { transactions } = get();
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    return transactions.filter(transaction => {
+      const transactionDate = new Date(transaction.createdAt);
+      return transactionDate >= start && transactionDate <= end;
     });
   },
 

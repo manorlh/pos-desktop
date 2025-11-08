@@ -1,1 +1,48 @@
-"use strict";const{contextBridge:r,ipcRenderer:t}=require("electron");r.exposeInMainWorld("ipcRenderer",{on(...e){const[n,o]=e;return t.on(n,(s,...i)=>o(s,...i))},off(...e){const[n,...o]=e;return t.off(n,...o)},send(...e){const[n,...o]=e;return t.send(n,...o)},invoke(...e){const[n,...o]=e;return t.invoke(n,...o)}});r.exposeInMainWorld("electronAPI",{getAppVersion:()=>t.invoke("get-app-version"),showMessageBox:e=>t.invoke("show-message-box",e),getPrinters:()=>t.invoke("get-printers"),printTest:e=>t.invoke("print-test",e),showPrintPreview:e=>t.invoke("show-print-preview",e),onMenuNewSale:e=>{t.on("menu-new-sale",e)},onMainProcessMessage:e=>{t.on("main-process-message",(n,o)=>e(o))}});window.addEventListener("DOMContentLoaded",()=>{const e=(n,o)=>{const s=document.getElementById(n);s&&(s.innerText=o)};for(const n of["chrome","node","electron"])e(`${n}-version`,process.versions[n]||"")});
+"use strict";
+const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("ipcRenderer", {
+  on(...args) {
+    const [channel, listener] = args;
+    return ipcRenderer.on(channel, (event, ...args2) => listener(event, ...args2));
+  },
+  off(...args) {
+    const [channel, ...omit] = args;
+    return ipcRenderer.off(channel, ...omit);
+  },
+  send(...args) {
+    const [channel, ...omit] = args;
+    return ipcRenderer.send(channel, ...omit);
+  },
+  invoke(...args) {
+    const [channel, ...omit] = args;
+    return ipcRenderer.invoke(channel, ...omit);
+  }
+});
+contextBridge.exposeInMainWorld("electronAPI", {
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  showMessageBox: (options) => ipcRenderer.invoke("show-message-box", options),
+  // Printer functions
+  getPrinters: () => ipcRenderer.invoke("get-printers"),
+  printTest: (printerName) => ipcRenderer.invoke("print-test", printerName),
+  showPrintPreview: (printerName) => ipcRenderer.invoke("show-print-preview", printerName),
+  // Tax Report functions
+  getAvailableDrives: () => ipcRenderer.invoke("get-available-drives"),
+  selectExportDirectory: () => ipcRenderer.invoke("select-export-directory"),
+  generateTaxReport: (options) => ipcRenderer.invoke("generate-tax-report", options),
+  printReportSummary: (summary) => ipcRenderer.invoke("print-report-summary", summary),
+  onMenuNewSale: (callback) => {
+    ipcRenderer.on("menu-new-sale", callback);
+  },
+  onMainProcessMessage: (callback) => {
+    ipcRenderer.on("main-process-message", (event, message) => callback(message));
+  }
+});
+window.addEventListener("DOMContentLoaded", () => {
+  const replaceText = (selector, text) => {
+    const element = document.getElementById(selector);
+    if (element) element.innerText = text;
+  };
+  for (const dependency of ["chrome", "node", "electron"]) {
+    replaceText(`${dependency}-version`, process.versions[dependency] || "");
+  }
+});
