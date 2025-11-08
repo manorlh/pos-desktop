@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
+import { VirtualKeyboardProvider } from './contexts/VirtualKeyboardContext';
 import { useProductStore } from './stores/useProductStore';
 import { useTransactionStore } from './stores/useTransactionStore';
 import { mockProducts, mockCategories, mockPaymentMethods, mockUser } from './data/mockData';
@@ -18,9 +19,11 @@ function App() {
   }, [setProducts, setCategories, setPaymentMethods, setCurrentUser]);
 
   return (
-    <div className="h-screen bg-background">
-      <MainLayout />
-    </div>
+    <VirtualKeyboardProvider>
+      <div className="h-screen bg-background">
+        <MainLayout />
+      </div>
+    </VirtualKeyboardProvider>
   );
 }
 
