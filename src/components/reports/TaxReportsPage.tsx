@@ -103,7 +103,8 @@ export function TaxReportsPage() {
       }
 
       dateRange = { start, end };
-      filteredTransactions = getTransactionsByDateRange(start, end);
+      // Query database directly via IPC (memory efficient - doesn't load all into memory)
+      filteredTransactions = await getTransactionsByDateRange(start, end);
     } else {
       const year = parseInt(taxYear);
       if (isNaN(year) || year < 2000 || year > 2100) {
@@ -117,7 +118,8 @@ export function TaxReportsPage() {
       dateRange = { year };
       const yearStart = new Date(year, 0, 1);
       const yearEnd = new Date(year, 11, 31, 23, 59, 59);
-      filteredTransactions = getTransactionsByDateRange(yearStart, yearEnd);
+      // Query database directly via IPC (memory efficient - doesn't load all into memory)
+      filteredTransactions = await getTransactionsByDateRange(yearStart, yearEnd);
     }
 
     if (filteredTransactions.length === 0) {

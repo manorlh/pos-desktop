@@ -5,6 +5,7 @@ import { POSView } from '../pos/POSView';
 import { TransactionHistory } from '../transactions/TransactionHistory';
 import { PrinterTest } from '../test/PrinterTest';
 import { TaxReportsPage } from '../reports/TaxReportsPage';
+import { SettingsPage } from '../settings/SettingsPage';
 import type { ViewType } from '@/types/layout';
 
 export function MainLayout() {
@@ -23,7 +24,7 @@ export function MainLayout() {
       case 'test':
         return <PrinterTest />;
       case 'settings':
-        return <div className="p-6">Settings (Coming Soon)</div>;
+        return <SettingsPage />;
       default:
         return <POSView />;
     }

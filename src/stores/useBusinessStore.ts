@@ -1,5 +1,13 @@
 import { create } from 'zustand';
 import taxReportConfig from '../config/tax-report-config.json';
+// Database operations will be added via IPC later
+// import { 
+//   getDatabase,
+//   getBusinessInfo,
+//   getSoftwareInfo,
+//   saveBusinessInfo,
+//   saveSoftwareInfo 
+// } from '../database/database';
 
 export interface BusinessInfo {
   vatNumber: string; // 9 digits
@@ -39,6 +47,8 @@ interface BusinessStore {
   setBusinessInfo: (info: Partial<BusinessInfo>) => void;
   setSoftwareInfo: (info: Partial<SoftwareInfo>) => void;
   setTaxReportConfig: (config: Partial<TaxReportConfig>) => void;
+  loadFromDatabase: () => Promise<void>;
+  saveToDatabase: () => Promise<void>;
 }
 
 // Load defaults from JSON config file
@@ -94,6 +104,60 @@ export const useBusinessStore = create<BusinessStore>((set) => ({
     set((state) => ({
       taxReportConfig: { ...state.taxReportConfig, ...config }
     }));
+  },
+
+  loadFromDatabase: async () => {
+    try {
+      if (window.electronAPI) {
+        const businessRow = await window.electronAPI.dbGetBusinessInfo();
+        const softwareRow = await window.electronAPI.dbGetSoftwareInfo();
+        
+        if (businessRow) {
+          set({
+            businessInfo: {
+              vatNumber: businessRow.vatNumber,
+              companyName: businessRow.companyName,
+              companyAddress: businessRow.companyAddress,
+              companyAddressNumber: businessRow.companyAddressNumber,
+              companyCity: businessRow.companyCity,
+              companyZip: businessRow.companyZip,
+              companyRegNumber: businessRow.companyRegNumber || undefined,
+              hasBranches: businessRow.hasBranches,
+              branchId: businessRow.branchId || undefined,
+            }
+          });
+        }
+        
+        if (softwareRow) {
+          set({
+            softwareInfo: {
+              registrationNumber: softwareRow.registrationNumber,
+              name: softwareRow.name,
+              version: softwareRow.version,
+              manufacturerId: softwareRow.manufacturerId,
+              manufacturerName: softwareRow.manufacturerName,
+              softwareType: softwareRow.softwareType as 'single-year' | 'multi-year',
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load business info from database:', error);
+      // Keep defaults from JSON
+    }
+  },
+
+  saveToDatabase: async () => {
+    try {
+      const { businessInfo, softwareInfo } = get();
+      if (window.electronAPI) {
+        await window.electronAPI.dbSaveBusinessInfo(businessInfo);
+        await window.electronAPI.dbSaveSoftwareInfo(softwareInfo);
+      }
+    } catch (error) {
+      console.error('Failed to save business info to database:', error);
+      throw error;
+    }
   },
 }));
 

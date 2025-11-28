@@ -5,6 +5,628 @@ const archiver = require('archiver');
 const iconv = require('iconv-lite');
 
 const __dirname = path.dirname(__filename);
+// Resolve better-sqlite3 from project root node_modules
+// In development, __dirname is dist-electron, so we go up one level to project root
+const projectRoot = app.isPackaged 
+  ? process.resourcesPath
+  : path.resolve(__dirname, '..');
+// Use absolute path to better-sqlite3 package directory
+// Node.js will resolve to lib/index.js via package.json main field
+const betterSqlite3Path = path.join(projectRoot, 'node_modules', 'better-sqlite3');
+const Database = require(betterSqlite3Path);
+
+// ============================================================================
+// Database initialization and operations (inlined from database-main.ts and database-ops.ts)
+// ============================================================================
+
+let dbInstance: any = null;
+
+function createSchema(db: any): void {
+  // Products table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price REAL NOT NULL,
+      sku TEXT NOT NULL UNIQUE,
+      categoryId TEXT NOT NULL,
+      imageUrl TEXT,
+      inStock INTEGER NOT NULL DEFAULT 1,
+      stockQuantity INTEGER NOT NULL DEFAULT 0,
+      barcode TEXT,
+      taxRate REAL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (categoryId) REFERENCES categories(id)
+    )
+  `);
+
+  // Categories table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      color TEXT,
+      imageUrl TEXT,
+      parentId TEXT,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (parentId) REFERENCES categories(id)
+    )
+  `);
+
+  // Customers table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      loyaltyPoints INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  // Users table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  // Transactions table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      transactionNumber TEXT NOT NULL UNIQUE,
+      customerId TEXT,
+      status TEXT NOT NULL DEFAULT 'completed',
+      receiptUrl TEXT,
+      notes TEXT,
+      cashierId TEXT NOT NULL,
+      documentType INTEGER NOT NULL,
+      documentProductionDate TEXT NOT NULL,
+      branchId TEXT,
+      documentDiscount REAL,
+      whtDeduction REAL,
+      amountTendered REAL,
+      changeAmount REAL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (customerId) REFERENCES customers(id),
+      FOREIGN KEY (cashierId) REFERENCES users(id)
+    )
+  `);
+
+  // Transaction items table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transaction_items (
+      id TEXT PRIMARY KEY,
+      transactionId TEXT NOT NULL,
+      productId TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unitPrice REAL NOT NULL,
+      totalPrice REAL NOT NULL,
+      discount REAL,
+      discountType TEXT,
+      transactionType INTEGER,
+      lineDiscount REAL,
+      notes TEXT,
+      FOREIGN KEY (transactionId) REFERENCES transactions(id) ON DELETE CASCADE,
+      FOREIGN KEY (productId) REFERENCES products(id)
+    )
+  `);
+
+  // Settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
+  // Business info table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS business_info (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      vatNumber TEXT NOT NULL,
+      companyName TEXT NOT NULL,
+      companyAddress TEXT NOT NULL,
+      companyAddressNumber TEXT NOT NULL,
+      companyCity TEXT NOT NULL,
+      companyZip TEXT NOT NULL,
+      companyRegNumber TEXT,
+      hasBranches INTEGER NOT NULL DEFAULT 0,
+      branchId TEXT,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  // Software info table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS software_info (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      registrationNumber TEXT NOT NULL,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      manufacturerId TEXT NOT NULL,
+      manufacturerName TEXT NOT NULL,
+      softwareType TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  // Create indexes
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_transactions_createdAt ON transactions(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_transactions_transactionNumber ON transactions(transactionNumber);
+    CREATE INDEX IF NOT EXISTS idx_transactions_customerId ON transactions(customerId);
+    CREATE INDEX IF NOT EXISTS idx_transaction_items_transactionId ON transaction_items(transactionId);
+    CREATE INDEX IF NOT EXISTS idx_products_categoryId ON products(categoryId);
+    CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+  `);
+}
+
+function initializeDatabaseMain(dbPath: string): any {
+  // Ensure directory exists
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  dbInstance = new Database(dbPath);
+  dbInstance.pragma('journal_mode = WAL');
+  dbInstance.pragma('foreign_keys = ON');
+  
+  createSchema(dbInstance);
+  
+  return dbInstance;
+}
+
+function getDatabaseMain(): any {
+  if (!dbInstance) {
+    throw new Error('Database not initialized');
+  }
+  return dbInstance;
+}
+
+function closeDatabaseMain(): void {
+  if (dbInstance) {
+    dbInstance.close();
+    dbInstance = null;
+  }
+}
+
+// Database operations
+function getAllProducts(db: any): any[] {
+  const rows = db.prepare('SELECT * FROM products ORDER BY name').all();
+  return rows.map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || undefined,
+    price: row.price,
+    sku: row.sku,
+    categoryId: row.categoryId,
+    imageUrl: row.imageUrl || undefined,
+    inStock: row.inStock === 1,
+    stockQuantity: row.stockQuantity,
+    barcode: row.barcode || undefined,
+    taxRate: row.taxRate || undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+function saveProduct(db: any, product: any): void {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO products 
+    (id, name, description, price, sku, categoryId, imageUrl, inStock, stockQuantity, barcode, taxRate, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    product.id,
+    product.name,
+    product.description || null,
+    product.price,
+    product.sku,
+    product.categoryId,
+    product.imageUrl || null,
+    product.inStock ? 1 : 0,
+    product.stockQuantity,
+    product.barcode || null,
+    product.taxRate || null,
+    product.createdAt,
+    product.updatedAt
+  );
+}
+
+function getAllCategories(db: any): any[] {
+  const rows = db.prepare('SELECT * FROM categories ORDER BY sortOrder, name').all();
+  return rows.map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || undefined,
+    color: row.color || undefined,
+    imageUrl: row.imageUrl || undefined,
+    parentId: row.parentId || undefined,
+    isActive: row.isActive === 1,
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+function saveCategory(db: any, category: any): void {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO categories 
+    (id, name, description, color, imageUrl, parentId, isActive, sortOrder, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    category.id,
+    category.name,
+    category.description || null,
+    category.color || null,
+    category.imageUrl || null,
+    category.parentId || null,
+    category.isActive ? 1 : 0,
+    category.sortOrder,
+    category.createdAt,
+    category.updatedAt
+  );
+}
+
+function getAllUsers(db: any): any[] {
+  const rows = db.prepare('SELECT * FROM users ORDER BY name').all();
+  return rows.map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    isActive: row.isActive === 1,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+function saveUser(db: any, user: any): void {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO users 
+    (id, name, email, role, isActive, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    user.id,
+    user.name,
+    user.email,
+    user.role,
+    user.isActive ? 1 : 0,
+    user.createdAt,
+    user.updatedAt
+  );
+}
+
+function loadTransactionWithRelations(db: any, row: any): any {
+  // Load customer
+  let customer = undefined;
+  if (row.customerId) {
+    const customerRow = db.prepare('SELECT * FROM customers WHERE id = ?').get(row.customerId);
+    if (customerRow) {
+      customer = {
+        id: customerRow.id,
+        name: customerRow.name,
+        email: customerRow.email || undefined,
+        phone: customerRow.phone || undefined,
+        address: customerRow.address ? JSON.parse(customerRow.address) : undefined,
+        loyaltyPoints: customerRow.loyaltyPoints,
+        createdAt: customerRow.createdAt,
+        updatedAt: customerRow.updatedAt,
+      };
+    }
+  }
+  
+  // Load cashier
+  const cashierRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.cashierId);
+  const cashier = {
+    id: cashierRow.id,
+    name: cashierRow.name,
+    email: cashierRow.email,
+    role: cashierRow.role,
+    isActive: cashierRow.isActive === 1,
+    createdAt: cashierRow.createdAt,
+    updatedAt: cashierRow.updatedAt,
+  };
+  
+  // Load cart items
+  const itemRows = db.prepare('SELECT * FROM transaction_items WHERE transactionId = ?').all(row.id);
+  const products = getAllProducts(db);
+  const items = itemRows.map((itemRow: any) => {
+    const product = products.find((p: any) => p.id === itemRow.productId);
+    if (!product) {
+      console.warn(`Product ${itemRow.productId} not found for transaction ${row.id}`);
+      return null;
+    }
+    
+    return {
+      id: itemRow.id,
+      productId: itemRow.productId,
+      product: {
+        ...product,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+      },
+      quantity: itemRow.quantity,
+      unitPrice: itemRow.unitPrice,
+      totalPrice: itemRow.totalPrice,
+      discount: itemRow.discount || undefined,
+      discountType: itemRow.discountType || undefined,
+      notes: itemRow.notes || undefined,
+      transactionType: itemRow.transactionType || undefined,
+      lineDiscount: itemRow.lineDiscount || undefined,
+    };
+  }).filter(Boolean);
+  
+  // Calculate cart totals
+  const subtotal = items.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
+  const taxAmount = items.reduce((sum: number, item: any) => {
+    const taxRate = item.product.taxRate || 0;
+    return sum + (item.totalPrice * taxRate / 100);
+  }, 0);
+  const discountAmount = items.reduce((sum: number, item: any) => sum + (item.discount || 0), 0);
+  const totalAmount = subtotal + taxAmount - discountAmount;
+  
+  const cart = {
+    id: row.id,
+    items,
+    subtotal,
+    taxAmount,
+    discountAmount,
+    totalAmount,
+    customerId: row.customerId || undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+  
+  return {
+    id: row.id,
+    transactionNumber: row.transactionNumber,
+    cart,
+    customer,
+    status: row.status,
+    receiptUrl: row.receiptUrl || undefined,
+    notes: row.notes || undefined,
+    cashier,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    documentType: row.documentType,
+    documentProductionDate: row.documentProductionDate || row.createdAt,
+    branchId: row.branchId || undefined,
+    documentDiscount: row.documentDiscount || undefined,
+    whtDeduction: row.whtDeduction || undefined,
+    amountTendered: row.amountTendered || undefined,
+    changeAmount: row.changeAmount || undefined,
+  };
+}
+
+function getTodaysTransactions(db: any): any[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE datetime(createdAt) >= datetime(?) AND datetime(createdAt) < datetime(?)
+    ORDER BY createdAt DESC
+  `).all(today.toISOString(), tomorrow.toISOString());
+  
+  return rows.map((row: any) => loadTransactionWithRelations(db, row));
+}
+
+function getTransactionsByDateRange(db: any, startDate: string, endDate: string): any[] {
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE datetime(createdAt) >= datetime(?) AND datetime(createdAt) <= datetime(?)
+    ORDER BY createdAt DESC
+  `).all(startDate, endDate);
+  
+  return rows.map((row: any) => loadTransactionWithRelations(db, row));
+}
+
+function getTransactionsPage(db: any, options: any): { transactions: any[]; total: number } {
+  const { startDate, endDate, limit = 50, offset = 0, status } = options;
+  
+  let whereClause = '1=1';
+  const params: any[] = [];
+  
+  if (startDate) {
+    whereClause += ' AND datetime(createdAt) >= datetime(?)';
+    params.push(startDate);
+  }
+  
+  if (endDate) {
+    whereClause += ' AND datetime(createdAt) <= datetime(?)';
+    params.push(endDate);
+  }
+  
+  if (status) {
+    whereClause += ' AND status = ?';
+    params.push(status);
+  }
+  
+  // Get total count
+  const countStmt = db.prepare(`SELECT COUNT(*) as count FROM transactions WHERE ${whereClause}`);
+  const countResult = countStmt.get(...params);
+  const total = countResult.count;
+  
+  // Get paginated results
+  params.push(limit, offset);
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE ${whereClause}
+    ORDER BY createdAt DESC
+    LIMIT ? OFFSET ?
+  `).all(...params);
+  
+  const transactions = rows.map((row: any) => loadTransactionWithRelations(db, row));
+  
+  return { transactions, total };
+}
+
+function saveTransaction(db: any, transaction: any): void {
+  const trans = db.transaction(() => {
+    // Save transaction
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO transactions 
+      (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      transaction.id,
+      transaction.transactionNumber,
+      transaction.customer?.id || null,
+      transaction.status,
+      transaction.receiptUrl || null,
+      transaction.notes || null,
+      transaction.cashier.id,
+      transaction.documentType,
+      transaction.documentProductionDate,
+      transaction.branchId || null,
+      transaction.documentDiscount || null,
+      transaction.whtDeduction || null,
+      transaction.amountTendered || null,
+      transaction.changeAmount || null,
+      transaction.createdAt,
+      transaction.updatedAt
+    );
+    
+    // Delete old items
+    db.prepare('DELETE FROM transaction_items WHERE transactionId = ?').run(transaction.id);
+    
+    // Save items
+    const itemStmt = db.prepare(`
+      INSERT INTO transaction_items 
+      (id, transactionId, productId, quantity, unitPrice, totalPrice, discount, discountType, transactionType, lineDiscount, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    for (const item of transaction.cart.items) {
+      itemStmt.run(
+        item.id,
+        transaction.id,
+        item.productId,
+        item.quantity,
+        item.unitPrice,
+        item.totalPrice,
+        item.discount || null,
+        item.discountType || null,
+        item.transactionType || null,
+        item.lineDiscount || null,
+        item.notes || null
+      );
+    }
+  });
+  
+  trans();
+}
+
+function getBusinessInfo(db: any): any | null {
+  const row = db.prepare('SELECT * FROM business_info WHERE id = 1').get();
+  if (!row) return null;
+  return {
+    vatNumber: row.vatNumber,
+    companyName: row.companyName,
+    companyAddress: row.companyAddress,
+    companyAddressNumber: row.companyAddressNumber,
+    companyCity: row.companyCity,
+    companyZip: row.companyZip,
+    companyRegNumber: row.companyRegNumber,
+    hasBranches: row.hasBranches === 1,
+    branchId: row.branchId,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function saveBusinessInfo(db: any, info: any): void {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO business_info 
+    (id, vatNumber, companyName, companyAddress, companyAddressNumber, companyCity, companyZip, 
+     companyRegNumber, hasBranches, branchId, updatedAt)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    info.vatNumber,
+    info.companyName,
+    info.companyAddress,
+    info.companyAddressNumber,
+    info.companyCity,
+    info.companyZip,
+    info.companyRegNumber || null,
+    info.hasBranches ? 1 : 0,
+    info.branchId || null,
+    new Date().toISOString()
+  );
+}
+
+function getSoftwareInfo(db: any): any | null {
+  const row = db.prepare('SELECT * FROM software_info WHERE id = 1').get();
+  if (!row) return null;
+  return {
+    registrationNumber: row.registrationNumber,
+    name: row.name,
+    version: row.version,
+    manufacturerId: row.manufacturerId,
+    manufacturerName: row.manufacturerName,
+    softwareType: row.softwareType,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function saveSoftwareInfo(db: any, info: any): void {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO software_info 
+    (id, registrationNumber, name, version, manufacturerId, manufacturerName, softwareType, updatedAt)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  stmt.run(
+    info.registrationNumber,
+    info.name,
+    info.version,
+    info.manufacturerId,
+    info.manufacturerName,
+    info.softwareType,
+    new Date().toISOString()
+  );
+}
+
+// ============================================================================
 
 // The built directory structure
 //
@@ -33,16 +655,21 @@ function createWindow() {
     icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
+      nodeIntegration: false, // Keep disabled for security
+      contextIsolation: true, // Keep enabled for security
     },
     titleBarStyle: 'default',
     show: false,
+    fullscreen: true, // Start in fullscreen mode
   });
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', new Date().toLocaleString());
+    // Ensure fullscreen after load
+    if (win && !win.isFullScreen()) {
+      win.setFullScreen(true);
+    }
   });
 
   // In development, load from Vite dev server
@@ -736,6 +1363,267 @@ ipcMain.handle('print-report-summary', async (event, summary) => {
       });
     });
   } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Database IPC handlers
+
+ipcMain.handle('get-database-path', async () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const defaultPath = path.join(userDataPath, 'database', 'pos.db');
+    
+    // Try to read from settings
+    const settingsPath = path.join(userDataPath, 'settings.json');
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (settings.databasePath) {
+        return settings.databasePath;
+      }
+    }
+    
+    return defaultPath;
+  } catch (error: any) {
+    console.error('Error getting database path:', error);
+    const userDataPath = app.getPath('userData');
+    return path.join(userDataPath, 'database', 'pos.db');
+  }
+});
+
+ipcMain.handle('set-database-path', async (event, dbPath: string) => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const settingsPath = path.join(userDataPath, 'settings.json');
+    
+    let settings: any = {};
+    if (fs.existsSync(settingsPath)) {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    }
+    
+    settings.databasePath = dbPath;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error setting database path:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('initialize-database', async (event, dbPath: string) => {
+  try {
+    initializeDatabaseMain(dbPath);
+    return { success: true, path: dbPath };
+  } catch (error: any) {
+    console.error('Error initializing database:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('database-exists', async (event, dbPath: string) => {
+  try {
+    return fs.existsSync(dbPath);
+  } catch (error: any) {
+    return false;
+  }
+});
+
+ipcMain.handle('backup-database', async (event, dbPath: string) => {
+  try {
+    if (!fs.existsSync(dbPath)) {
+      return { success: false, error: 'Database file does not exist' };
+    }
+    
+    const backupDir = path.join(path.dirname(dbPath), 'backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `pos-backup-${timestamp}.db`);
+    
+    fs.copyFileSync(dbPath, backupPath);
+    
+    return { success: true, backupPath };
+  } catch (error: any) {
+    console.error('Error backing up database:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('select-database-path', async () => {
+  try {
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Select Database Location',
+      defaultPath: 'pos.db',
+      filters: [
+        { name: 'SQLite Database', extensions: ['db'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+    });
+    
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    
+    return result.filePath;
+  } catch (error: any) {
+    console.error('Error selecting database path:', error);
+    return null;
+  }
+});
+
+// Database operation IPC handlers
+ipcMain.handle('db-get-products', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllProducts(db);
+  } catch (error: any) {
+    console.error('Error getting products:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-save-product', async (event, product: any) => {
+  try {
+    const db = getDatabaseMain();
+    saveProduct(db, product);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving product:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-categories', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllCategories(db);
+  } catch (error: any) {
+    console.error('Error getting categories:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-save-category', async (event, category: any) => {
+  try {
+    const db = getDatabaseMain();
+    saveCategory(db, category);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving category:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-users', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllUsers(db);
+  } catch (error: any) {
+    console.error('Error getting users:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-save-user', async (event, user: any) => {
+  try {
+    const db = getDatabaseMain();
+    saveUser(db, user);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving user:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-todays-transactions', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getTodaysTransactions(db);
+  } catch (error: any) {
+    console.error('Error getting today\'s transactions:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-get-transactions-by-date-range', async (event, startDate: string, endDate: string) => {
+  try {
+    const db = getDatabaseMain();
+    return getTransactionsByDateRange(db, startDate, endDate);
+  } catch (error: any) {
+    console.error('Error getting transactions by date range:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-get-transactions-page', async (event, options: any) => {
+  try {
+    const db = getDatabaseMain();
+    return getTransactionsPage(db, options);
+  } catch (error: any) {
+    console.error('Error getting transactions page:', error);
+    return { transactions: [], total: 0 };
+  }
+});
+
+ipcMain.handle('db-save-transaction', async (event, transaction: any) => {
+  try {
+    const db = getDatabaseMain();
+    // Convert dates to ISO strings for storage
+    const tx = {
+      ...transaction,
+      createdAt: transaction.createdAt || new Date().toISOString(),
+      updatedAt: transaction.updatedAt || new Date().toISOString(),
+      documentProductionDate: transaction.documentProductionDate || new Date().toISOString(),
+    };
+    saveTransaction(db, tx);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving transaction:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-business-info', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getBusinessInfo(db);
+  } catch (error: any) {
+    console.error('Error getting business info:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-save-business-info', async (event, info: any) => {
+  try {
+    const db = getDatabaseMain();
+    saveBusinessInfo(db, info);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving business info:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-software-info', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getSoftwareInfo(db);
+  } catch (error: any) {
+    console.error('Error getting software info:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-save-software-info', async (event, info: any) => {
+  try {
+    const db = getDatabaseMain();
+    saveSoftwareInfo(db, info);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving software info:', error);
     return { success: false, error: error.message };
   }
 });

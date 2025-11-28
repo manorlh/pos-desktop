@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { CreditCard, DollarSign, Smartphone, Check } from 'lucide-react';
+import { DollarSign, Check } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
-import { generateUUID } from '@/utils/uuid';
 import { 
   Dialog, 
   DialogContent, 
@@ -12,9 +11,7 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Card, CardContent } from '../ui/card';
 import { formatCurrency } from '@/lib/utils';
-import type { PaymentMethod, PaymentDetails } from '@/types/index';
 
 interface CheckoutDialogProps {
   open: boolean;
@@ -22,50 +19,35 @@ interface CheckoutDialogProps {
 }
 
 export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null);
   const [amountTendered, setAmountTendered] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   
   const { cart, clearCart } = useCartStore();
-  const { paymentMethods, addTransaction } = useTransactionStore();
+  const { addTransaction } = useTransactionStore();
 
-  const changeAmount = selectedPaymentMethod?.type === 'cash' 
-    ? Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount)
-    : 0;
-
-  const canComplete = selectedPaymentMethod && 
-    (selectedPaymentMethod.type !== 'cash' || parseFloat(amountTendered || '0') >= cart.totalAmount);
-
-  const handlePaymentMethodSelect = (method: PaymentMethod) => {
-    setSelectedPaymentMethod(method);
-    if (method.type !== 'cash') {
-      setAmountTendered(cart.totalAmount.toString());
-    }
-  };
+  const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount);
+  const canComplete = parseFloat(amountTendered || '0') >= cart.totalAmount;
 
   const handleCompleteTransaction = async () => {
-    if (!selectedPaymentMethod || !canComplete) return;
+    if (!canComplete) return;
 
     setIsProcessing(true);
     
     try {
-      const paymentDetails: PaymentDetails = {
-        method: selectedPaymentMethod,
-        amount: cart.totalAmount,
-        amountTendered: selectedPaymentMethod.type === 'cash' ? parseFloat(amountTendered) : cart.totalAmount,
+      const amountTenderedNum = parseFloat(amountTendered);
+      
+      await addTransaction(cart, {
+        amountTendered: amountTenderedNum,
         changeAmount: changeAmount,
-        transactionId: generateUUID(),
-      };
-
-      await addTransaction(cart, paymentDetails);
+      });
+      
       setIsComplete(true);
       
       // Simulate processing time
       setTimeout(() => {
         clearCart();
         setIsComplete(false);
-        setSelectedPaymentMethod(null);
         setAmountTendered('');
         onOpenChange(false);
       }, 2000);
@@ -77,7 +59,6 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   };
 
   const resetDialog = () => {
-    setSelectedPaymentMethod(null);
     setAmountTendered('');
     setIsComplete(false);
     setIsProcessing(false);
@@ -121,7 +102,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         <DialogHeader>
           <DialogTitle>Checkout</DialogTitle>
           <DialogDescription>
-            Complete the sale by selecting a payment method
+            Complete the sale with cash payment
           </DialogDescription>
         </DialogHeader>
 
@@ -160,57 +141,40 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
             </div>
           </div>
 
-          {/* Payment Methods */}
+          {/* Cash Payment */}
           <div>
-            <h3 className="font-semibold mb-4">Payment Method</h3>
-            <div className="space-y-3 mb-4">
-              {paymentMethods.map((method) => {
-                const Icon = method.type === 'cash' ? DollarSign : 
-                           method.type === 'card' ? CreditCard : Smartphone;
-                
-                return (
-                  <Card 
-                    key={method.id}
-                    className={`cursor-pointer transition-colors ${
-                      selectedPaymentMethod?.id === method.id 
-                        ? 'ring-2 ring-primary bg-primary/5' 
-                        : 'hover:bg-muted/50'
-                    }`}
-                    onClick={() => handlePaymentMethodSelect(method)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <Icon className="h-5 w-5" />
-                        <span className="font-medium">{method.name}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {/* Cash Payment Input */}
-            {selectedPaymentMethod?.type === 'cash' && (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm font-medium">Amount Tendered</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={amountTendered}
-                    onChange={(e) => setAmountTendered(e.target.value)}
-                    placeholder="0.00"
-                    className="mt-1"
-                  />
-                </div>
-                {changeAmount > 0 && (
-                  <div className="p-3 bg-muted rounded-lg">
-                    <div className="text-sm text-muted-foreground">Change Due</div>
-                    <div className="text-lg font-bold">{formatCurrency(changeAmount)}</div>
-                  </div>
-                )}
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Cash Payment
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">Amount Tendered</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={amountTendered}
+                  onChange={(e) => setAmountTendered(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1 text-lg"
+                  autoFocus
+                />
               </div>
-            )}
+              
+              {changeAmount > 0 && (
+                <div className="p-4 bg-muted rounded-lg">
+                  <div className="text-sm text-muted-foreground">Change Due</div>
+                  <div className="text-2xl font-bold">{formatCurrency(changeAmount)}</div>
+                </div>
+              )}
+              
+              {parseFloat(amountTendered || '0') < cart.totalAmount && parseFloat(amountTendered || '0') > 0 && (
+                <div className="p-3 bg-destructive/10 text-destructive rounded-lg text-sm">
+                  Insufficient amount. Need {formatCurrency(cart.totalAmount - parseFloat(amountTendered || '0'))} more.
+                </div>
+              )}
+            </div>
 
             <Button 
               className="w-full mt-6" 

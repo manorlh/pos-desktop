@@ -1,22 +1,142 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { VirtualKeyboardProvider } from './contexts/VirtualKeyboardContext';
 import { useProductStore } from './stores/useProductStore';
 import { useTransactionStore } from './stores/useTransactionStore';
-import { mockProducts, mockCategories, mockPaymentMethods, mockUser } from './data/mockData';
+import { useBusinessStore } from './stores/useBusinessStore';
+import { useDatabaseStore } from './stores/useDatabaseStore';
+import { mockProducts, mockCategories, mockUser } from './data/mockData';
 import './globals.css';
 
 function App() {
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
+  
   const { setProducts, setCategories } = useProductStore();
-  const { setPaymentMethods, setCurrentUser } = useTransactionStore();
+  const { setCurrentUser } = useTransactionStore();
+  const { setDbPath } = useDatabaseStore();
+  const { businessInfo, softwareInfo } = useBusinessStore();
 
   useEffect(() => {
-    // Initialize mock data
-    setProducts(mockProducts);
-    setCategories(mockCategories);
-    setPaymentMethods(mockPaymentMethods);
-    setCurrentUser(mockUser);
-  }, [setProducts, setCategories, setPaymentMethods, setCurrentUser]);
+    initializeApp();
+  }, []);
+
+  const initializeApp = async () => {
+    try {
+      // Check if Electron API is available
+      if (!window.electronAPI) {
+        throw new Error('Electron API not available');
+      }
+
+      // Get database path and initialize
+      const dbPath = await window.electronAPI.getDatabasePath();
+      setDbPath(dbPath);
+      
+      // Initialize database
+      const initResult = await window.electronAPI.initializeDatabase(dbPath);
+      if (!initResult.success) {
+        throw new Error(initResult.error || 'Failed to initialize database');
+      }
+
+      // Check if database is empty (first run)
+      const existingProducts = await window.electronAPI.dbGetProducts();
+      const existingCategories = await window.electronAPI.dbGetCategories();
+      const existingUsers = await window.electronAPI.dbGetUsers();
+      
+      // If database is empty, seed with mock data
+      if (existingProducts.length === 0 && existingCategories.length === 0) {
+        console.log('Database is empty, seeding with initial data...');
+        
+        // Save categories
+        for (const category of mockCategories) {
+          await window.electronAPI.dbSaveCategory({
+            ...category,
+            createdAt: category.createdAt.toISOString(),
+            updatedAt: category.updatedAt.toISOString(),
+          });
+        }
+        
+        // Save products
+        for (const product of mockProducts) {
+          await window.electronAPI.dbSaveProduct({
+            ...product,
+            createdAt: product.createdAt.toISOString(),
+            updatedAt: product.updatedAt.toISOString(),
+          });
+        }
+        
+        // Save default user
+        await window.electronAPI.dbSaveUser({
+          ...mockUser,
+          createdAt: mockUser.createdAt.toISOString(),
+          updatedAt: mockUser.updatedAt.toISOString(),
+        });
+        
+        // Save business info (from JSON config)
+        await window.electronAPI.dbSaveBusinessInfo(businessInfo);
+        await window.electronAPI.dbSaveSoftwareInfo(softwareInfo);
+      }
+      
+      // Load data into stores
+      const { loadProducts, loadCategories } = useProductStore.getState();
+      await loadProducts();
+      await loadCategories();
+      
+      // Set current user
+      const users = existingUsers.length > 0 
+        ? existingUsers.map((u: any) => ({
+            ...u,
+            createdAt: new Date(u.createdAt),
+            updatedAt: new Date(u.updatedAt),
+          }))
+        : [mockUser];
+      setCurrentUser(users[0]);
+      
+      // Load business info
+      const { loadFromDatabase } = useBusinessStore.getState();
+      await loadFromDatabase();
+      
+      // Load today's transactions
+      const { loadTodaysTransactions } = useTransactionStore.getState();
+      await loadTodaysTransactions();
+      
+      setIsInitializing(false);
+    } catch (error: any) {
+      console.error('Failed to initialize app:', error);
+      setInitError(error.message || 'Failed to initialize application');
+      
+      // Fallback to mock data if database fails
+      setProducts(mockProducts);
+      setCategories(mockCategories);
+      setCurrentUser(mockUser);
+      setIsInitializing(false);
+    }
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Initializing application...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="h-screen bg-background flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="text-destructive text-lg font-semibold mb-2">Initialization Error</div>
+          <p className="text-muted-foreground mb-4">{initError}</p>
+          <p className="text-sm text-muted-foreground">
+            The application will continue with limited functionality. Please check your database settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <VirtualKeyboardProvider>

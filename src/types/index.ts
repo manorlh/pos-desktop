@@ -78,8 +78,6 @@ export interface Transaction {
   transactionNumber: string;
   cart: Cart;
   customer?: Customer;
-  paymentMethod: PaymentMethod;
-  paymentDetails: PaymentDetails;
   status: TransactionStatus;
   receiptUrl?: string;
   notes?: string;
@@ -92,27 +90,9 @@ export interface Transaction {
   branchId?: string; // 7 characters, conditional if hasBranches=true
   documentDiscount?: number; // Negative sign for discounts
   whtDeduction?: number; // Positive sign, for receipts only (Withholding Tax)
-}
-
-export interface PaymentMethod {
-  id: string;
-  type: 'cash' | 'card' | 'digital' | 'check' | 'gift_card';
-  name: string;
-  isActive: boolean;
-}
-
-export interface PaymentDetails {
-  method: PaymentMethod;
-  amount: number;
-  amountTendered?: number;
-  changeAmount?: number;
-  cardLastFour?: string;
-  cardType?: string;
-  authorizationCode?: string;
-  transactionId?: string;
-  // Tax Authority fields
-  bankNumber?: string; // For checks (10 digits)
-  creditTransactionType?: 1 | 2 | 3 | 4; // For credit cards: 1=Regular, 2=Installments, 3=Credit, 4=Deferred Charge
+  // Cash payment fields (cash-only POS)
+  amountTendered?: number; // Cash amount tendered
+  changeAmount?: number; // Change given
 }
 
 export interface User {
@@ -138,11 +118,7 @@ export interface DailySummary {
     quantitySold: number;
     revenue: number;
   }>;
-  paymentBreakdown: Array<{
-    method: PaymentMethod;
-    count: number;
-    amount: number;
-  }>;
+  // Cash-only: no payment breakdown needed
 }
 
 export interface Receipt {

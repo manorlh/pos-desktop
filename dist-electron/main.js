@@ -5,6 +5,529 @@ const fs = require("fs");
 const archiver = require("archiver");
 const iconv = require("iconv-lite");
 const __dirname$1 = path.dirname(__filename);
+const projectRoot = app.isPackaged ? process.resourcesPath : path.resolve(__dirname$1, "..");
+const betterSqlite3Path = path.join(projectRoot, "node_modules", "better-sqlite3");
+const Database = require(betterSqlite3Path);
+let dbInstance = null;
+function createSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price REAL NOT NULL,
+      sku TEXT NOT NULL UNIQUE,
+      categoryId TEXT NOT NULL,
+      imageUrl TEXT,
+      inStock INTEGER NOT NULL DEFAULT 1,
+      stockQuantity INTEGER NOT NULL DEFAULT 0,
+      barcode TEXT,
+      taxRate REAL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (categoryId) REFERENCES categories(id)
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      color TEXT,
+      imageUrl TEXT,
+      parentId TEXT,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (parentId) REFERENCES categories(id)
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      loyaltyPoints INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      transactionNumber TEXT NOT NULL UNIQUE,
+      customerId TEXT,
+      status TEXT NOT NULL DEFAULT 'completed',
+      receiptUrl TEXT,
+      notes TEXT,
+      cashierId TEXT NOT NULL,
+      documentType INTEGER NOT NULL,
+      documentProductionDate TEXT NOT NULL,
+      branchId TEXT,
+      documentDiscount REAL,
+      whtDeduction REAL,
+      amountTendered REAL,
+      changeAmount REAL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (customerId) REFERENCES customers(id),
+      FOREIGN KEY (cashierId) REFERENCES users(id)
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transaction_items (
+      id TEXT PRIMARY KEY,
+      transactionId TEXT NOT NULL,
+      productId TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unitPrice REAL NOT NULL,
+      totalPrice REAL NOT NULL,
+      discount REAL,
+      discountType TEXT,
+      transactionType INTEGER,
+      lineDiscount REAL,
+      notes TEXT,
+      FOREIGN KEY (transactionId) REFERENCES transactions(id) ON DELETE CASCADE,
+      FOREIGN KEY (productId) REFERENCES products(id)
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS business_info (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      vatNumber TEXT NOT NULL,
+      companyName TEXT NOT NULL,
+      companyAddress TEXT NOT NULL,
+      companyAddressNumber TEXT NOT NULL,
+      companyCity TEXT NOT NULL,
+      companyZip TEXT NOT NULL,
+      companyRegNumber TEXT,
+      hasBranches INTEGER NOT NULL DEFAULT 0,
+      branchId TEXT,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS software_info (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      registrationNumber TEXT NOT NULL,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      manufacturerId TEXT NOT NULL,
+      manufacturerName TEXT NOT NULL,
+      softwareType TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_transactions_createdAt ON transactions(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_transactions_transactionNumber ON transactions(transactionNumber);
+    CREATE INDEX IF NOT EXISTS idx_transactions_customerId ON transactions(customerId);
+    CREATE INDEX IF NOT EXISTS idx_transaction_items_transactionId ON transaction_items(transactionId);
+    CREATE INDEX IF NOT EXISTS idx_products_categoryId ON products(categoryId);
+    CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+  `);
+}
+function initializeDatabaseMain(dbPath) {
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (e) {
+    }
+  }
+  dbInstance = new Database(dbPath);
+  dbInstance.pragma("journal_mode = WAL");
+  dbInstance.pragma("foreign_keys = ON");
+  createSchema(dbInstance);
+  return dbInstance;
+}
+function getDatabaseMain() {
+  if (!dbInstance) {
+    throw new Error("Database not initialized");
+  }
+  return dbInstance;
+}
+function getAllProducts(db) {
+  const rows = db.prepare("SELECT * FROM products ORDER BY name").all();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || void 0,
+    price: row.price,
+    sku: row.sku,
+    categoryId: row.categoryId,
+    imageUrl: row.imageUrl || void 0,
+    inStock: row.inStock === 1,
+    stockQuantity: row.stockQuantity,
+    barcode: row.barcode || void 0,
+    taxRate: row.taxRate || void 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+}
+function saveProduct(db, product) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO products 
+    (id, name, description, price, sku, categoryId, imageUrl, inStock, stockQuantity, barcode, taxRate, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    product.id,
+    product.name,
+    product.description || null,
+    product.price,
+    product.sku,
+    product.categoryId,
+    product.imageUrl || null,
+    product.inStock ? 1 : 0,
+    product.stockQuantity,
+    product.barcode || null,
+    product.taxRate || null,
+    product.createdAt,
+    product.updatedAt
+  );
+}
+function getAllCategories(db) {
+  const rows = db.prepare("SELECT * FROM categories ORDER BY sortOrder, name").all();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description || void 0,
+    color: row.color || void 0,
+    imageUrl: row.imageUrl || void 0,
+    parentId: row.parentId || void 0,
+    isActive: row.isActive === 1,
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+}
+function saveCategory(db, category) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO categories 
+    (id, name, description, color, imageUrl, parentId, isActive, sortOrder, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    category.id,
+    category.name,
+    category.description || null,
+    category.color || null,
+    category.imageUrl || null,
+    category.parentId || null,
+    category.isActive ? 1 : 0,
+    category.sortOrder,
+    category.createdAt,
+    category.updatedAt
+  );
+}
+function getAllUsers(db) {
+  const rows = db.prepare("SELECT * FROM users ORDER BY name").all();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    isActive: row.isActive === 1,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+}
+function saveUser(db, user) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO users 
+    (id, name, email, role, isActive, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    user.id,
+    user.name,
+    user.email,
+    user.role,
+    user.isActive ? 1 : 0,
+    user.createdAt,
+    user.updatedAt
+  );
+}
+function loadTransactionWithRelations(db, row) {
+  let customer = void 0;
+  if (row.customerId) {
+    const customerRow = db.prepare("SELECT * FROM customers WHERE id = ?").get(row.customerId);
+    if (customerRow) {
+      customer = {
+        id: customerRow.id,
+        name: customerRow.name,
+        email: customerRow.email || void 0,
+        phone: customerRow.phone || void 0,
+        address: customerRow.address ? JSON.parse(customerRow.address) : void 0,
+        loyaltyPoints: customerRow.loyaltyPoints,
+        createdAt: customerRow.createdAt,
+        updatedAt: customerRow.updatedAt
+      };
+    }
+  }
+  const cashierRow = db.prepare("SELECT * FROM users WHERE id = ?").get(row.cashierId);
+  const cashier = {
+    id: cashierRow.id,
+    name: cashierRow.name,
+    email: cashierRow.email,
+    role: cashierRow.role,
+    isActive: cashierRow.isActive === 1,
+    createdAt: cashierRow.createdAt,
+    updatedAt: cashierRow.updatedAt
+  };
+  const itemRows = db.prepare("SELECT * FROM transaction_items WHERE transactionId = ?").all(row.id);
+  const products = getAllProducts(db);
+  const items = itemRows.map((itemRow) => {
+    const product = products.find((p) => p.id === itemRow.productId);
+    if (!product) {
+      console.warn(`Product ${itemRow.productId} not found for transaction ${row.id}`);
+      return null;
+    }
+    return {
+      id: itemRow.id,
+      productId: itemRow.productId,
+      product: {
+        ...product,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt
+      },
+      quantity: itemRow.quantity,
+      unitPrice: itemRow.unitPrice,
+      totalPrice: itemRow.totalPrice,
+      discount: itemRow.discount || void 0,
+      discountType: itemRow.discountType || void 0,
+      notes: itemRow.notes || void 0,
+      transactionType: itemRow.transactionType || void 0,
+      lineDiscount: itemRow.lineDiscount || void 0
+    };
+  }).filter(Boolean);
+  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
+  const taxAmount = items.reduce((sum, item) => {
+    const taxRate = item.product.taxRate || 0;
+    return sum + item.totalPrice * taxRate / 100;
+  }, 0);
+  const discountAmount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
+  const totalAmount = subtotal + taxAmount - discountAmount;
+  const cart = {
+    id: row.id,
+    items,
+    subtotal,
+    taxAmount,
+    discountAmount,
+    totalAmount,
+    customerId: row.customerId || void 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+  return {
+    id: row.id,
+    transactionNumber: row.transactionNumber,
+    cart,
+    customer,
+    status: row.status,
+    receiptUrl: row.receiptUrl || void 0,
+    notes: row.notes || void 0,
+    cashier,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    documentType: row.documentType,
+    documentProductionDate: row.documentProductionDate || row.createdAt,
+    branchId: row.branchId || void 0,
+    documentDiscount: row.documentDiscount || void 0,
+    whtDeduction: row.whtDeduction || void 0,
+    amountTendered: row.amountTendered || void 0,
+    changeAmount: row.changeAmount || void 0
+  };
+}
+function getTodaysTransactions(db) {
+  const today = /* @__PURE__ */ new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE datetime(createdAt) >= datetime(?) AND datetime(createdAt) < datetime(?)
+    ORDER BY createdAt DESC
+  `).all(today.toISOString(), tomorrow.toISOString());
+  return rows.map((row) => loadTransactionWithRelations(db, row));
+}
+function getTransactionsByDateRange(db, startDate, endDate) {
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE datetime(createdAt) >= datetime(?) AND datetime(createdAt) <= datetime(?)
+    ORDER BY createdAt DESC
+  `).all(startDate, endDate);
+  return rows.map((row) => loadTransactionWithRelations(db, row));
+}
+function getTransactionsPage(db, options) {
+  const { startDate, endDate, limit = 50, offset = 0, status } = options;
+  let whereClause = "1=1";
+  const params = [];
+  if (startDate) {
+    whereClause += " AND datetime(createdAt) >= datetime(?)";
+    params.push(startDate);
+  }
+  if (endDate) {
+    whereClause += " AND datetime(createdAt) <= datetime(?)";
+    params.push(endDate);
+  }
+  if (status) {
+    whereClause += " AND status = ?";
+    params.push(status);
+  }
+  const countStmt = db.prepare(`SELECT COUNT(*) as count FROM transactions WHERE ${whereClause}`);
+  const countResult = countStmt.get(...params);
+  const total = countResult.count;
+  params.push(limit, offset);
+  const rows = db.prepare(`
+    SELECT * FROM transactions 
+    WHERE ${whereClause}
+    ORDER BY createdAt DESC
+    LIMIT ? OFFSET ?
+  `).all(...params);
+  const transactions = rows.map((row) => loadTransactionWithRelations(db, row));
+  return { transactions, total };
+}
+function saveTransaction(db, transaction) {
+  const trans = db.transaction(() => {
+    var _a;
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO transactions 
+      (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      transaction.id,
+      transaction.transactionNumber,
+      ((_a = transaction.customer) == null ? void 0 : _a.id) || null,
+      transaction.status,
+      transaction.receiptUrl || null,
+      transaction.notes || null,
+      transaction.cashier.id,
+      transaction.documentType,
+      transaction.documentProductionDate,
+      transaction.branchId || null,
+      transaction.documentDiscount || null,
+      transaction.whtDeduction || null,
+      transaction.amountTendered || null,
+      transaction.changeAmount || null,
+      transaction.createdAt,
+      transaction.updatedAt
+    );
+    db.prepare("DELETE FROM transaction_items WHERE transactionId = ?").run(transaction.id);
+    const itemStmt = db.prepare(`
+      INSERT INTO transaction_items 
+      (id, transactionId, productId, quantity, unitPrice, totalPrice, discount, discountType, transactionType, lineDiscount, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const item of transaction.cart.items) {
+      itemStmt.run(
+        item.id,
+        transaction.id,
+        item.productId,
+        item.quantity,
+        item.unitPrice,
+        item.totalPrice,
+        item.discount || null,
+        item.discountType || null,
+        item.transactionType || null,
+        item.lineDiscount || null,
+        item.notes || null
+      );
+    }
+  });
+  trans();
+}
+function getBusinessInfo(db) {
+  const row = db.prepare("SELECT * FROM business_info WHERE id = 1").get();
+  if (!row) return null;
+  return {
+    vatNumber: row.vatNumber,
+    companyName: row.companyName,
+    companyAddress: row.companyAddress,
+    companyAddressNumber: row.companyAddressNumber,
+    companyCity: row.companyCity,
+    companyZip: row.companyZip,
+    companyRegNumber: row.companyRegNumber,
+    hasBranches: row.hasBranches === 1,
+    branchId: row.branchId,
+    updatedAt: row.updatedAt
+  };
+}
+function saveBusinessInfo(db, info) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO business_info 
+    (id, vatNumber, companyName, companyAddress, companyAddressNumber, companyCity, companyZip, 
+     companyRegNumber, hasBranches, branchId, updatedAt)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    info.vatNumber,
+    info.companyName,
+    info.companyAddress,
+    info.companyAddressNumber,
+    info.companyCity,
+    info.companyZip,
+    info.companyRegNumber || null,
+    info.hasBranches ? 1 : 0,
+    info.branchId || null,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
+}
+function getSoftwareInfo(db) {
+  const row = db.prepare("SELECT * FROM software_info WHERE id = 1").get();
+  if (!row) return null;
+  return {
+    registrationNumber: row.registrationNumber,
+    name: row.name,
+    version: row.version,
+    manufacturerId: row.manufacturerId,
+    manufacturerName: row.manufacturerName,
+    softwareType: row.softwareType,
+    updatedAt: row.updatedAt
+  };
+}
+function saveSoftwareInfo(db, info) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO software_info 
+    (id, registrationNumber, name, version, manufacturerId, manufacturerName, softwareType, updatedAt)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    info.registrationNumber,
+    info.name,
+    info.version,
+    info.manufacturerId,
+    info.manufacturerName,
+    info.softwareType,
+    (/* @__PURE__ */ new Date()).toISOString()
+  );
+}
 process.env.DIST = path.join(__dirname$1, "../dist");
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, "../public");
 let win;
@@ -19,13 +542,20 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname$1, "preload.js"),
       nodeIntegration: false,
+      // Keep disabled for security
       contextIsolation: true
+      // Keep enabled for security
     },
     titleBarStyle: "default",
-    show: false
+    show: false,
+    fullscreen: true
+    // Start in fullscreen mode
   });
   win.webContents.on("did-finish-load", () => {
     win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+    if (win && !win.isFullScreen()) {
+      win.setFullScreen(true);
+    }
   });
   if (process.env.IS_DEV === "true" || !app.isPackaged) {
     console.log("Development mode detected");
@@ -601,6 +1131,231 @@ ipcMain.handle("print-report-summary", async (event, summary) => {
       });
     });
   } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("get-database-path", async () => {
+  try {
+    const userDataPath = app.getPath("userData");
+    const defaultPath = path.join(userDataPath, "database", "pos.db");
+    const settingsPath = path.join(userDataPath, "settings.json");
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+      if (settings.databasePath) {
+        return settings.databasePath;
+      }
+    }
+    return defaultPath;
+  } catch (error) {
+    console.error("Error getting database path:", error);
+    const userDataPath = app.getPath("userData");
+    return path.join(userDataPath, "database", "pos.db");
+  }
+});
+ipcMain.handle("set-database-path", async (event, dbPath) => {
+  try {
+    const userDataPath = app.getPath("userData");
+    const settingsPath = path.join(userDataPath, "settings.json");
+    let settings = {};
+    if (fs.existsSync(settingsPath)) {
+      settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    }
+    settings.databasePath = dbPath;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    return { success: true };
+  } catch (error) {
+    console.error("Error setting database path:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("initialize-database", async (event, dbPath) => {
+  try {
+    initializeDatabaseMain(dbPath);
+    return { success: true, path: dbPath };
+  } catch (error) {
+    console.error("Error initializing database:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("database-exists", async (event, dbPath) => {
+  try {
+    return fs.existsSync(dbPath);
+  } catch (error) {
+    return false;
+  }
+});
+ipcMain.handle("backup-database", async (event, dbPath) => {
+  try {
+    if (!fs.existsSync(dbPath)) {
+      return { success: false, error: "Database file does not exist" };
+    }
+    const backupDir = path.join(path.dirname(dbPath), "backups");
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const backupPath = path.join(backupDir, `pos-backup-${timestamp}.db`);
+    fs.copyFileSync(dbPath, backupPath);
+    return { success: true, backupPath };
+  } catch (error) {
+    console.error("Error backing up database:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("select-database-path", async () => {
+  try {
+    const result = await dialog.showSaveDialog(win, {
+      title: "Select Database Location",
+      defaultPath: "pos.db",
+      filters: [
+        { name: "SQLite Database", extensions: ["db"] },
+        { name: "All Files", extensions: ["*"] }
+      ]
+    });
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    return result.filePath;
+  } catch (error) {
+    console.error("Error selecting database path:", error);
+    return null;
+  }
+});
+ipcMain.handle("db-get-products", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllProducts(db);
+  } catch (error) {
+    console.error("Error getting products:", error);
+    return [];
+  }
+});
+ipcMain.handle("db-save-product", async (event, product) => {
+  try {
+    const db = getDatabaseMain();
+    saveProduct(db, product);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving product:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-categories", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllCategories(db);
+  } catch (error) {
+    console.error("Error getting categories:", error);
+    return [];
+  }
+});
+ipcMain.handle("db-save-category", async (event, category) => {
+  try {
+    const db = getDatabaseMain();
+    saveCategory(db, category);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving category:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-users", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getAllUsers(db);
+  } catch (error) {
+    console.error("Error getting users:", error);
+    return [];
+  }
+});
+ipcMain.handle("db-save-user", async (event, user) => {
+  try {
+    const db = getDatabaseMain();
+    saveUser(db, user);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving user:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-todays-transactions", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getTodaysTransactions(db);
+  } catch (error) {
+    console.error("Error getting today's transactions:", error);
+    return [];
+  }
+});
+ipcMain.handle("db-get-transactions-by-date-range", async (event, startDate, endDate) => {
+  try {
+    const db = getDatabaseMain();
+    return getTransactionsByDateRange(db, startDate, endDate);
+  } catch (error) {
+    console.error("Error getting transactions by date range:", error);
+    return [];
+  }
+});
+ipcMain.handle("db-get-transactions-page", async (event, options) => {
+  try {
+    const db = getDatabaseMain();
+    return getTransactionsPage(db, options);
+  } catch (error) {
+    console.error("Error getting transactions page:", error);
+    return { transactions: [], total: 0 };
+  }
+});
+ipcMain.handle("db-save-transaction", async (event, transaction) => {
+  try {
+    const db = getDatabaseMain();
+    const tx = {
+      ...transaction,
+      createdAt: transaction.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+      updatedAt: transaction.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      documentProductionDate: transaction.documentProductionDate || (/* @__PURE__ */ new Date()).toISOString()
+    };
+    saveTransaction(db, tx);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving transaction:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-business-info", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getBusinessInfo(db);
+  } catch (error) {
+    console.error("Error getting business info:", error);
+    return null;
+  }
+});
+ipcMain.handle("db-save-business-info", async (event, info) => {
+  try {
+    const db = getDatabaseMain();
+    saveBusinessInfo(db, info);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving business info:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-software-info", async () => {
+  try {
+    const db = getDatabaseMain();
+    return getSoftwareInfo(db);
+  } catch (error) {
+    console.error("Error getting software info:", error);
+    return null;
+  }
+});
+ipcMain.handle("db-save-software-info", async (event, info) => {
+  try {
+    const db = getDatabaseMain();
+    saveSoftwareInfo(db, info);
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving software info:", error);
     return { success: false, error: error.message };
   }
 });

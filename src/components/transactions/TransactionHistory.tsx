@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Calendar, Receipt, Search, Filter } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Calendar, Receipt, Search, Filter, ChevronLeft, ChevronRight, DollarSign } from 'lucide-react';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
@@ -10,20 +10,79 @@ import type { Transaction } from '@/types/index';
 
 export function TransactionHistory() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [startDate, setStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30); // Default: last 30 days
+    return date;
+  });
+  const [endDate, setEndDate] = useState(new Date());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [totalTransactions, setTotalTransactions] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showDateFilter, setShowDateFilter] = useState(false);
   
-  const { transactions, getTodaysTransactions } = useTransactionStore();
-  
+  const { getTransactionsByDateRange, getTodaysTransactions } = useTransactionStore();
+  const pageSize = 50;
+
+  // Load transactions when date range changes
+  useEffect(() => {
+    loadTransactions();
+  }, [startDate, endDate, currentPage]);
+
+  const loadTransactions = async () => {
+    setIsLoading(true);
+    try {
+      // Use paginated query for better performance
+      const { loadTransactionsPage } = useTransactionStore.getState();
+      const result = await loadTransactionsPage(currentPage, pageSize, {
+        startDate,
+        endDate,
+      });
+      setTransactions(result.transactions);
+      setTotalTransactions(result.total);
+    } catch (error) {
+      console.error('Failed to load transactions:', error);
+      setTransactions([]);
+      setTotalTransactions(0);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Get today's summary
   const todaysTransactions = getTodaysTransactions();
-  const filteredTransactions = todaysTransactions.filter(transaction =>
+  const todaysTotalSales = todaysTransactions.reduce((sum, t) => sum + t.cart.totalAmount, 0);
+  const todaysTransactionCount = todaysTransactions.length;
+  const averageTicket = todaysTransactionCount > 0 ? todaysTotalSales / todaysTransactionCount : 0;
+
+  const filteredTransactions = transactions.filter(transaction =>
     transaction.transactionNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     transaction.customer?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     transaction.cashier.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const todaysTotalSales = todaysTransactions.reduce((sum, t) => sum + t.cart.totalAmount, 0);
-  const todaysTransactionCount = todaysTransactions.length;
-  const averageTicket = todaysTransactionCount > 0 ? todaysTotalSales / todaysTransactionCount : 0;
+  const totalPages = Math.ceil(totalTransactions / pageSize);
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const handleTodayClick = () => {
+    const today = new Date();
+    setStartDate(today);
+    setEndDate(today);
+    setCurrentPage(1);
+    setShowDateFilter(false);
+  };
 
   const getStatusColor = (status: Transaction['status']) => {
     switch (status) {
@@ -35,16 +94,6 @@ export function TransactionHistory() {
     }
   };
 
-  const getPaymentMethodIcon = (type: string) => {
-    switch (type) {
-      case 'cash': return '💵';
-      case 'card': return '💳';
-      case 'digital': return '📱';
-      case 'check': return '🏦';
-      case 'gift_card': return '🎁';
-      default: return '💳';
-    }
-  };
 
   return (
     <div className="p-6 h-full overflow-auto">
@@ -93,8 +142,8 @@ export function TransactionHistory() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4 mb-6">
-        <div className="relative flex-1">
+      <div className="flex gap-4 mb-6 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search transactions..."
@@ -103,30 +152,77 @@ export function TransactionHistory() {
             className="pl-10"
           />
         </div>
-        <Button variant="outline">
+        <Button variant="outline" onClick={handleTodayClick}>
           <Calendar className="mr-2 h-4 w-4" />
           Today
         </Button>
-        <Button variant="outline">
+        <Button 
+          variant="outline" 
+          onClick={() => setShowDateFilter(!showDateFilter)}
+        >
           <Filter className="mr-2 h-4 w-4" />
-          Filter
+          Date Range
         </Button>
       </div>
 
+      {/* Date Range Filter */}
+      {showDateFilter && (
+        <Card className="mb-6">
+          <CardContent className="p-4">
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="text-sm font-medium mb-1 block">Start Date</label>
+                <Input
+                  type="date"
+                  value={startDate.toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    setStartDate(new Date(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-sm font-medium mb-1 block">End Date</label>
+                <Input
+                  type="date"
+                  value={endDate.toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    setEndDate(new Date(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+              <Button onClick={() => setShowDateFilter(false)} variant="outline">
+                Close
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Transactions List */}
-      <div className="space-y-4">
-        {filteredTransactions.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Receipt className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No transactions found</h3>
-              <p className="text-muted-foreground">
-                {searchQuery ? 'Try adjusting your search criteria' : 'No transactions for today yet'}
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          filteredTransactions.map((transaction) => (
+      {isLoading ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading transactions...</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {filteredTransactions.length === 0 ? (
+            <Card>
+              <CardContent className="p-12 text-center">
+                <Receipt className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No transactions found</h3>
+                <p className="text-muted-foreground">
+                  {searchQuery ? 'Try adjusting your search criteria' : `No transactions found for the selected date range`}
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {filteredTransactions.map((transaction) => (
             <Card key={transaction.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
@@ -150,10 +246,10 @@ export function TransactionHistory() {
                       </div>
                       
                       <div>
-                        <p className="text-muted-foreground">Payment Method</p>
+                        <p className="text-muted-foreground">Payment</p>
                         <div className="flex items-center gap-1">
-                          <span>{getPaymentMethodIcon(transaction.paymentMethod.type)}</span>
-                          <span className="font-medium">{transaction.paymentMethod.name}</span>
+                          <DollarSign className="h-4 w-4" />
+                          <span className="font-medium">Cash</span>
                         </div>
                       </div>
                       
@@ -184,18 +280,59 @@ export function TransactionHistory() {
                     <div className="text-2xl font-bold">
                       {formatCurrency(transaction.cart.totalAmount)}
                     </div>
-                    {transaction.paymentDetails.changeAmount && transaction.paymentDetails.changeAmount > 0 && (
+                    {transaction.changeAmount && transaction.changeAmount > 0 && (
                       <p className="text-sm text-muted-foreground">
-                        Change: {formatCurrency(transaction.paymentDetails.changeAmount)}
+                        Change: {formatCurrency(transaction.changeAmount)}
+                      </p>
+                    )}
+                    {transaction.amountTendered && (
+                      <p className="text-xs text-muted-foreground">
+                        Tendered: {formatCurrency(transaction.amountTendered)}
                       </p>
                     )}
                   </div>
                 </div>
               </CardContent>
             </Card>
-          ))
-        )}
-      </div>
+              ))}
+              
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-6">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalTransactions)} of {totalTransactions} transactions
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePreviousPage}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNextPage}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

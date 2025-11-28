@@ -35,6 +35,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateTaxReport: (options: any) => ipcRenderer.invoke('generate-tax-report', options),
   printReportSummary: (summary: any) => ipcRenderer.invoke('print-report-summary', summary),
   
+  // Database functions
+  getDatabasePath: () => ipcRenderer.invoke('get-database-path'),
+  setDatabasePath: (path: string) => ipcRenderer.invoke('set-database-path', path),
+  initializeDatabase: (path: string) => ipcRenderer.invoke('initialize-database', path),
+  databaseExists: (path: string) => ipcRenderer.invoke('database-exists', path),
+  backupDatabase: (path: string) => ipcRenderer.invoke('backup-database', path),
+  selectDatabasePath: () => ipcRenderer.invoke('select-database-path'),
+  
+  // Database operations
+  dbGetProducts: () => ipcRenderer.invoke('db-get-products'),
+  dbSaveProduct: (product: any) => ipcRenderer.invoke('db-save-product', product),
+  dbGetCategories: () => ipcRenderer.invoke('db-get-categories'),
+  dbSaveCategory: (category: any) => ipcRenderer.invoke('db-save-category', category),
+  dbGetUsers: () => ipcRenderer.invoke('db-get-users'),
+  dbSaveUser: (user: any) => ipcRenderer.invoke('db-save-user', user),
+  dbGetTodaysTransactions: () => ipcRenderer.invoke('db-get-todays-transactions'),
+  dbGetTransactionsByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-transactions-by-date-range', startDate, endDate),
+  dbGetTransactionsPage: (options: any) => ipcRenderer.invoke('db-get-transactions-page', options),
+  dbSaveTransaction: (transaction: any) => ipcRenderer.invoke('db-save-transaction', transaction),
+  dbGetBusinessInfo: () => ipcRenderer.invoke('db-get-business-info'),
+  dbSaveBusinessInfo: (info: any) => ipcRenderer.invoke('db-save-business-info', info),
+  dbGetSoftwareInfo: () => ipcRenderer.invoke('db-get-software-info'),
+  dbSaveSoftwareInfo: (info: any) => ipcRenderer.invoke('db-save-software-info', info),
+  
   onMenuNewSale: (callback: () => void) => {
     ipcRenderer.on('menu-new-sale', callback);
   },

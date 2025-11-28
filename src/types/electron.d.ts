@@ -45,6 +45,30 @@ interface ElectronAPI {
   generateTaxReport: (options: TaxReportOptions) => Promise<TaxReportResult>;
   printReportSummary: (summary: any) => Promise<PrintResult>;
   
+  // Database functions
+  getDatabasePath: () => Promise<string>;
+  setDatabasePath: (path: string) => Promise<{ success: boolean; error?: string }>;
+  initializeDatabase: (path: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+  databaseExists: (path: string) => Promise<boolean>;
+  backupDatabase: (path: string) => Promise<{ success: boolean; backupPath?: string; error?: string }>;
+  selectDatabasePath: () => Promise<string | null>;
+  
+  // Database operations
+  dbGetProducts: () => Promise<any[]>;
+  dbSaveProduct: (product: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetCategories: () => Promise<any[]>;
+  dbSaveCategory: (category: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetUsers: () => Promise<any[]>;
+  dbSaveUser: (user: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetTodaysTransactions: () => Promise<any[]>;
+  dbGetTransactionsByDateRange: (startDate: string, endDate: string) => Promise<any[]>;
+  dbGetTransactionsPage: (options: { startDate?: string; endDate?: string; limit?: number; offset?: number; status?: string }) => Promise<{ transactions: any[]; total: number }>;
+  dbSaveTransaction: (transaction: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetBusinessInfo: () => Promise<any | null>;
+  dbSaveBusinessInfo: (info: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetSoftwareInfo: () => Promise<any | null>;
+  dbSaveSoftwareInfo: (info: any) => Promise<{ success: boolean; error?: string }>;
+  
   onMenuNewSale: (callback: () => void) => void;
   onMainProcessMessage: (callback: (message: string) => void) => void;
 }

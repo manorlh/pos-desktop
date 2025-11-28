@@ -26,16 +26,98 @@ export function VirtualKeyboard({
   const keyboardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Sync with current value when keyboard opens or value changes
     setInput(currentValue);
   }, [currentValue, isOpen]);
 
+  // Sync with physical keyboard input in real-time and ensure input stays focused
   useEffect(() => {
-    if (isOpen && keyboardRef.current) {
-      keyboardRef.current.focus();
+    if (isOpen) {
+      // Find the focused input and keep it focused
+      const activeElement = document.activeElement as HTMLInputElement;
+      if (activeElement && activeElement.tagName === 'INPUT' && activeElement.type !== 'file') {
+        // Keep the input focused so physical keyboard works
+        const keepFocused = () => {
+          if (document.activeElement !== activeElement && activeElement.isConnected) {
+            // Use setTimeout to ensure focus happens after any other focus changes
+            setTimeout(() => {
+              if (document.activeElement !== activeElement && activeElement.isConnected) {
+                activeElement.focus();
+              }
+            }, 0);
+          }
+        };
+        
+        // Sync value from physical keyboard in real-time
+        const syncInterval = setInterval(() => {
+          if (activeElement.value !== input) {
+            setInput(activeElement.value);
+            onInput(activeElement.value);
+          }
+          // Continuously ensure input stays focused
+          keepFocused();
+        }, 50); // Check more frequently
+        
+        // Listen to input events directly for immediate sync
+        const handleInput = () => {
+          if (activeElement.value !== input) {
+            setInput(activeElement.value);
+            onInput(activeElement.value);
+          }
+        };
+        
+        // Listen to keyboard events to keep focus
+        const handleKeyDown = () => {
+          keepFocused();
+        };
+        
+        const handleKeyUp = () => {
+          keepFocused();
+        };
+        
+        // Add event listeners
+        activeElement.addEventListener('input', handleInput, true);
+        activeElement.addEventListener('keydown', handleKeyDown, true);
+        activeElement.addEventListener('keyup', handleKeyUp, true);
+        activeElement.addEventListener('focus', keepFocused, true);
+        activeElement.addEventListener('blur', keepFocused, true);
+        
+        // Ensure input is focused immediately and stays focused
+        activeElement.focus();
+        setTimeout(() => {
+          activeElement.focus();
+        }, 0);
+        setTimeout(() => {
+          activeElement.focus();
+        }, 100);
+        
+        return () => {
+          clearInterval(syncInterval);
+          activeElement.removeEventListener('input', handleInput, true);
+          activeElement.removeEventListener('keydown', handleKeyDown, true);
+          activeElement.removeEventListener('keyup', handleKeyUp, true);
+          activeElement.removeEventListener('focus', keepFocused, true);
+          activeElement.removeEventListener('blur', keepFocused, true);
+        };
+      }
+    }
+  }, [isOpen, input, onInput]);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Don't steal focus from the actual input field
+      // Keep the input field focused so physical keyboard works
       // Reset to Hebrew default when keyboard first opens
       if (inputType === 'text') {
         setLanguage('hebrew');
         setIsShift(false);
+      }
+      
+      // Ensure the actual input field stays focused
+      const activeElement = document.activeElement as HTMLInputElement;
+      if (activeElement && activeElement.tagName === 'INPUT') {
+        // Keep the input focused - don't move focus to keyboard
+        activeElement.focus();
       }
     }
   }, [isOpen, inputType]);
@@ -121,17 +203,28 @@ export function VirtualKeyboard({
   if (!isOpen) return null;
 
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50" 
-      onClick={onClose}
-      onTouchStart={(e) => e.stopPropagation()}
-    >
+    <>
+      {/* Overlay background - only handles mouse/touch, not keyboard */}
       <div 
-        className="bg-background border-t border-border rounded-t-lg shadow-lg w-full max-w-4xl max-h-[70vh] overflow-auto touch-manipulation"
+        className="fixed inset-0 z-40 bg-black/50" 
+        onClick={onClose}
+        onMouseDown={(e) => {
+          // Allow clicks to close, but don't interfere with keyboard
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
+        // No keyboard event handlers - keyboard events pass through to input
+      />
+      {/* Keyboard panel - positioned above overlay */}
+      <div 
+        className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t border-border rounded-t-lg shadow-lg w-full max-w-4xl max-h-[70vh] overflow-auto touch-manipulation mx-auto"
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
         ref={keyboardRef}
         tabIndex={-1}
+        onMouseDown={(e) => e.stopPropagation()}
+        // No keyboard event handlers - let physical keyboard work on input
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border gap-2">
@@ -146,6 +239,11 @@ export function VirtualKeyboard({
               )}
               placeholder={language === 'hebrew' ? 'הקלד כאן...' : 'Type here...'}
               dir={language === 'hebrew' ? 'rtl' : 'ltr'}
+              onKeyDown={(e) => {
+                // Allow physical keyboard to work on the actual input field
+                // This is just a display, so we don't need to handle keys here
+                e.stopPropagation();
+              }}
             />
           </div>
           {inputType === 'text' && (
@@ -239,7 +337,7 @@ export function VirtualKeyboard({
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
