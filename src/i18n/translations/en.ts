@@ -1,0 +1,198 @@
+export const en = {
+  // Navigation
+  nav: {
+    pos: 'Point of Sale',
+    transactions: 'Transactions',
+    products: 'Products',
+    categories: 'Categories',
+    reports: 'Tax Reports',
+    test: 'Printer Test',
+    settings: 'Settings',
+  },
+  
+  // Common
+  common: {
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Delete',
+    edit: 'Edit',
+    create: 'Create',
+    search: 'Search',
+    clear: 'Clear',
+    close: 'Close',
+    back: 'Back',
+    next: 'Next',
+    previous: 'Previous',
+    loading: 'Loading...',
+    noResults: 'No results found',
+    all: 'All',
+    yes: 'Yes',
+    no: 'No',
+    off: 'off',
+  },
+  
+  // POS
+  pos: {
+    title: 'Point of Sale',
+    addToCart: 'Add to Cart',
+    currentSale: 'Current Sale',
+    noItems: 'No items in cart',
+    addProducts: 'Add products to start a sale',
+    clearAll: 'Clear All',
+    subtotal: 'Subtotal',
+    discount: 'Discount',
+    tax: 'Tax',
+    total: 'Total',
+    checkout: 'Checkout',
+    items: 'items',
+    each: 'each',
+    stock: 'Stock',
+  },
+  
+  // Checkout
+  checkout: {
+    title: 'Checkout',
+    transactionComplete: 'Transaction Complete!',
+    cashPayment: 'Complete the sale with cash payment',
+    amountTendered: 'Amount Tendered',
+    changeDue: 'Change Due',
+    insufficientAmount: 'Insufficient amount. Need',
+    more: 'more',
+    completeSale: 'Complete Sale',
+    processing: 'Payment processed successfully.',
+    paymentMethod: 'Payment Method',
+    cash: 'Cash',
+    card: 'Card',
+    check: 'Check',
+    digital: 'Digital Payment',
+    giftCard: 'Gift Card',
+  },
+  
+  // Products
+  products: {
+    title: 'Products',
+    description: 'Manage your product inventory',
+    createProduct: 'Create Product',
+    editProduct: 'Edit Product',
+    productName: 'Product Name',
+    productDescription: 'Description',
+    price: 'Price',
+    sku: 'SKU',
+    barcode: 'Barcode',
+    category: 'Category',
+    selectCategory: 'Select a category',
+    stockQuantity: 'Stock Quantity',
+    inStock: 'In Stock',
+    outOfStock: 'Out of Stock',
+    available: 'Available',
+    unavailable: 'Unavailable',
+    toggleAvailability: 'Toggle Availability',
+    nameRequired: 'Product name is required',
+    priceRequired: 'Price is required',
+    priceInvalid: 'Price must be a valid positive number',
+    skuRequired: 'SKU is required',
+    categoryRequired: 'Category is required',
+    stockRequired: 'Stock quantity is required',
+    stockInvalid: 'Stock quantity must be a valid non-negative number',
+  },
+  
+  // Categories
+  categories: {
+    title: 'Categories',
+    description: 'Manage product categories',
+    createCategory: 'Create Category',
+    editCategory: 'Edit Category',
+    categoryName: 'Category Name',
+    categoryDescription: 'Description',
+    color: 'Color',
+    parentCategory: 'Parent Category',
+    none: 'None (Top-level category)',
+    active: 'Active',
+    inactive: 'Inactive',
+    toggleActive: 'Toggle Active',
+    nameRequired: 'Category name is required',
+  },
+  
+  // Transactions
+  transactions: {
+    title: 'Transactions',
+    todaySales: "Today's Sales",
+    totalSales: 'Total Sales',
+    averageTicket: 'Average Ticket',
+    transactionNumber: 'Transaction #',
+    date: 'Date',
+    customer: 'Customer',
+    cashier: 'Cashier',
+    amount: 'Amount',
+    status: 'Status',
+    completed: 'Completed',
+    pending: 'Pending',
+    cancelled: 'Cancelled',
+    change: 'Change',
+    tendered: 'Tendered',
+    paymentMethod: 'Payment Method',
+    viewDetails: 'View Details',
+    noTransactions: 'No transactions found',
+  },
+  
+  // Reports
+  reports: {
+    title: 'Tax Reports',
+    generateReport: 'Generate Tax Report',
+    selectDateRange: 'Select Date Range',
+    startDate: 'Start Date',
+    endDate: 'End Date',
+    year: 'Year',
+    generate: 'Generate',
+    export: 'Export',
+  },
+  
+  // Settings
+  settings: {
+    title: 'Settings',
+    database: 'Database Settings',
+    databasePath: 'Database Path',
+    browse: 'Browse',
+    testConnection: 'Test Connection',
+    backupDatabase: 'Backup Database',
+    interfaceSettings: 'Interface Settings',
+    virtualKeyboard: 'Virtual Keyboard',
+    virtualKeyboardDesc: 'Enable virtual keyboard for touch devices',
+    hideOutOfStock: 'Hide Out of Stock Products',
+    hideOutOfStockDesc: 'Hide products with zero stock from the product catalog',
+    language: 'Language',
+    languageDesc: 'Select application language',
+    taxSettings: 'Tax Settings',
+    taxRate: 'Tax Rate (%)',
+    taxRateDesc: 'Global tax rate for all products',
+    save: 'Save Tax Rate',
+    saved: 'saved successfully!',
+    testSuccess: 'Database connection successful!',
+    testFailed: 'Connection test failed',
+    backupSuccess: 'Backup created successfully!',
+    backupFailed: 'Backup failed',
+  },
+  
+  // Test
+  test: {
+    title: 'Printer Test',
+    testPrint: 'Test Print',
+    selectPrinter: 'Select Printer',
+    print: 'Print',
+  },
+  
+  // Header
+  header: {
+    cashier: 'Cashier',
+    store: 'Store',
+  },
+  
+  // Errors
+  errors: {
+    required: 'This field is required',
+    invalidNumber: 'Please enter a valid number',
+    invalidEmail: 'Please enter a valid email',
+    generic: 'An error occurred',
+  },
+};
+

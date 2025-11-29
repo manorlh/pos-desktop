@@ -7,11 +7,13 @@ import { Badge } from '../ui/badge';
 import { Switch } from '../ui/switch';
 import { ProductFormDialog } from './ProductFormDialog';
 import { useProductStore } from '@/stores/useProductStore';
+import { useI18n } from '@/i18n';
 import type { Product } from '@/types/index';
 import { formatCurrency } from '@/lib/utils';
 
 export function ProductsPage() {
   const { products, categories, loadProducts, loadCategories } = useProductStore();
+  const { t, locale } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -55,19 +57,19 @@ export function ProductsPage() {
   };
 
   const getCategoryName = (categoryId: string) => {
-    return categories.find((c) => c.id === categoryId)?.name || 'Unknown';
+    return categories.find((c) => c.id === categoryId)?.name || t('common.no');
   };
 
   return (
     <div className="flex flex-col h-full p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Products</h1>
-          <p className="text-muted-foreground">Manage your product inventory</p>
+          <h1 className="text-3xl font-bold">{t('products.title')}</h1>
+          <p className="text-muted-foreground">{t('products.description')}</p>
         </div>
         <Button onClick={handleCreate}>
           <Plus className="mr-2 h-4 w-4" />
-          Create Product
+          {t('products.createProduct')}
         </Button>
       </div>
 
@@ -76,7 +78,7 @@ export function ProductsPage() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search products by name, SKU, barcode, or description..."
+            placeholder={t('common.search') + '...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -89,7 +91,7 @@ export function ProductsPage() {
             size="sm"
             onClick={() => setSelectedCategory(null)}
           >
-            All Categories
+            {t('common.all')} {t('nav.categories')}
           </Button>
           {categories.map((category) => (
             <Button
@@ -109,16 +111,16 @@ export function ProductsPage() {
         {filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <Package className="h-16 w-16 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No products found</h3>
+            <h3 className="text-lg font-semibold mb-2">{t('common.noResults')}</h3>
             <p className="text-muted-foreground mb-4">
               {searchQuery || selectedCategory
-                ? 'Try adjusting your search or filters'
-                : 'Get started by creating your first product'}
+                ? t('common.noResults')
+                : t('products.description')}
             </p>
             {!searchQuery && !selectedCategory && (
               <Button onClick={handleCreate}>
                 <Plus className="mr-2 h-4 w-4" />
-                Create Product
+                {t('products.createProduct')}
               </Button>
             )}
           </div>
@@ -146,24 +148,24 @@ export function ProductsPage() {
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Price</span>
-                      <span className="font-bold text-primary">{formatCurrency(product.price)}</span>
+                      <span className="text-sm text-muted-foreground">{t('products.price')}</span>
+                      <span className="font-bold text-primary">{formatCurrency(product.price, locale)}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">SKU</span>
+                      <span className="text-sm text-muted-foreground">{t('products.sku')}</span>
                       <span className="text-sm font-mono">{product.sku}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Category</span>
+                      <span className="text-sm text-muted-foreground">{t('products.category')}</span>
                       <Badge variant="outline" className="text-xs">
                         {getCategoryName(product.categoryId)}
                       </Badge>
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Stock</span>
+                      <span className="text-sm text-muted-foreground">{t('pos.stock')}</span>
                       <Badge variant={product.stockQuantity > 0 ? 'default' : 'secondary'}>
                         {product.stockQuantity}
                       </Badge>
@@ -171,13 +173,13 @@ export function ProductsPage() {
 
                     {product.barcode && (
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Barcode</span>
+                        <span className="text-sm text-muted-foreground">{t('products.barcode')}</span>
                         <span className="text-sm font-mono text-xs">{product.barcode}</span>
                       </div>
                     )}
 
                     <div className="flex items-center justify-between pt-2 border-t">
-                      <span className="text-sm font-medium">Available</span>
+                      <span className="text-sm font-medium">{t('products.available')}</span>
                       <Switch
                         checked={product.inStock}
                         onCheckedChange={() => handleToggleAvailability(product)}

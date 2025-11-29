@@ -6,10 +6,12 @@ import { Badge } from '../ui/badge';
 import { Switch } from '../ui/switch';
 import { CategoryFormDialog } from './CategoryFormDialog';
 import { useProductStore } from '@/stores/useProductStore';
+import { useI18n } from '@/i18n';
 import type { Category } from '@/types/index';
 
 export function CategoriesPage() {
   const { categories, loadCategories } = useProductStore();
+  const { t } = useI18n();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
@@ -53,12 +55,12 @@ export function CategoriesPage() {
     <div className="flex flex-col h-full p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Categories</h1>
-          <p className="text-muted-foreground">Manage your product categories</p>
+          <h1 className="text-3xl font-bold">{t('categories.title')}</h1>
+          <p className="text-muted-foreground">{t('categories.description')}</p>
         </div>
         <Button onClick={handleCreate}>
           <Plus className="mr-2 h-4 w-4" />
-          Create Category
+          {t('categories.createCategory')}
         </Button>
       </div>
 
@@ -67,13 +69,13 @@ export function CategoriesPage() {
         {sortedCategories.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <Folder className="h-16 w-16 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No categories found</h3>
+            <h3 className="text-lg font-semibold mb-2">{t('common.noResults')}</h3>
             <p className="text-muted-foreground mb-4">
-              Get started by creating your first category
+              {t('categories.description')}
             </p>
             <Button onClick={handleCreate}>
               <Plus className="mr-2 h-4 w-4" />
-              Create Category
+              {t('categories.createCategory')}
             </Button>
           </div>
         ) : (
@@ -97,7 +99,7 @@ export function CategoriesPage() {
                           </h3>
                           {parentName && (
                             <p className="text-xs text-muted-foreground">
-                              Parent: {parentName}
+                              {t('categories.parentCategory')}: {parentName}
                             </p>
                           )}
                         </div>
@@ -128,7 +130,7 @@ export function CategoriesPage() {
 
                       {category.color && (
                         <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Color</span>
+                          <span className="text-sm text-muted-foreground">{t('categories.color')}</span>
                           <div className="flex items-center gap-2">
                             <div
                               className="w-6 h-6 rounded border"
@@ -140,7 +142,7 @@ export function CategoriesPage() {
                       )}
 
                       <div className="flex items-center justify-between pt-2 border-t">
-                        <span className="text-sm font-medium">Active</span>
+                        <span className="text-sm font-medium">{t('categories.active')}</span>
                         <Switch
                           checked={category.isActive}
                           onCheckedChange={() => handleToggleActive(category)}

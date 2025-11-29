@@ -1,0 +1,198 @@
+export const he = {
+  // Navigation
+  nav: {
+    pos: 'מערכת נקודת מכירה',
+    transactions: 'עסקאות',
+    products: 'מוצרים',
+    categories: 'קטגוריות',
+    reports: 'דוחות מס',
+    test: 'בדיקת מדפסת',
+    settings: 'הגדרות',
+  },
+  
+  // Common
+  common: {
+    save: 'שמור',
+    cancel: 'ביטול',
+    delete: 'מחק',
+    edit: 'ערוך',
+    create: 'צור',
+    search: 'חיפוש',
+    clear: 'נקה',
+    close: 'סגור',
+    back: 'חזור',
+    next: 'הבא',
+    previous: 'הקודם',
+    loading: 'טוען...',
+    noResults: 'לא נמצאו תוצאות',
+    all: 'הכל',
+    yes: 'כן',
+    no: 'לא',
+    off: 'הנחה',
+  },
+  
+  // POS
+  pos: {
+    title: 'מערכת נקודת מכירה',
+    addToCart: 'הוסף לעגלה',
+    currentSale: 'מכירה נוכחית',
+    noItems: 'אין פריטים בעגלה',
+    addProducts: 'הוסף מוצרים כדי להתחיל מכירה',
+    clearAll: 'נקה הכל',
+    subtotal: 'סיכום ביניים',
+    discount: 'הנחה',
+    tax: 'מס',
+    total: 'סה"כ',
+    checkout: 'תשלום',
+    items: 'פריטים',
+    each: 'כל אחד',
+    stock: 'מלאי',
+  },
+  
+  // Checkout
+  checkout: {
+    title: 'תשלום',
+    transactionComplete: 'עסקה הושלמה!',
+    cashPayment: 'סיים את המכירה בתשלום במזומן',
+    amountTendered: 'סכום שהוגש',
+    changeDue: 'עודף',
+    insufficientAmount: 'סכום לא מספיק. נדרש',
+    more: 'נוסף',
+    completeSale: 'סיים מכירה',
+    processing: 'תשלום עובד בהצלחה.',
+    paymentMethod: 'אמצעי תשלום',
+    cash: 'מזומן',
+    card: 'כרטיס',
+    check: 'צ\'ק',
+    digital: 'תשלום דיגיטלי',
+    giftCard: 'כרטיס מתנה',
+  },
+  
+  // Products
+  products: {
+    title: 'מוצרים',
+    description: 'נהל את מלאי המוצרים שלך',
+    createProduct: 'צור מוצר',
+    editProduct: 'ערוך מוצר',
+    productName: 'שם המוצר',
+    productDescription: 'תיאור',
+    price: 'מחיר',
+    sku: 'מק"ט',
+    barcode: 'ברקוד',
+    category: 'קטגוריה',
+    selectCategory: 'בחר קטגוריה',
+    stockQuantity: 'כמות במלאי',
+    inStock: 'במלאי',
+    outOfStock: 'אזל מהמלאי',
+    available: 'זמין',
+    unavailable: 'לא זמין',
+    toggleAvailability: 'החלף זמינות',
+    nameRequired: 'שם המוצר נדרש',
+    priceRequired: 'מחיר נדרש',
+    priceInvalid: 'מחיר חייב להיות מספר חיובי תקין',
+    skuRequired: 'מק"ט נדרש',
+    categoryRequired: 'קטגוריה נדרשת',
+    stockRequired: 'כמות במלאי נדרשת',
+    stockInvalid: 'כמות במלאי חייבת להיות מספר לא שלילי תקין',
+  },
+  
+  // Categories
+  categories: {
+    title: 'קטגוריות',
+    description: 'נהל קטגוריות מוצרים',
+    createCategory: 'צור קטגוריה',
+    editCategory: 'ערוך קטגוריה',
+    categoryName: 'שם הקטגוריה',
+    categoryDescription: 'תיאור',
+    color: 'צבע',
+    parentCategory: 'קטגוריה אב',
+    none: 'ללא (קטגוריה ראשית)',
+    active: 'פעיל',
+    inactive: 'לא פעיל',
+    toggleActive: 'החלף פעילות',
+    nameRequired: 'שם הקטגוריה נדרש',
+  },
+  
+  // Transactions
+  transactions: {
+    title: 'עסקאות',
+    todaySales: 'מכירות היום',
+    totalSales: 'סה"כ מכירות',
+    averageTicket: 'חשבונית ממוצעת',
+    transactionNumber: 'עסקה #',
+    date: 'תאריך',
+    customer: 'לקוח',
+    cashier: 'קופאי',
+    amount: 'סכום',
+    status: 'סטטוס',
+    completed: 'הושלם',
+    pending: 'ממתין',
+    cancelled: 'בוטל',
+    change: 'עודף',
+    tendered: 'הוגש',
+    paymentMethod: 'אמצעי תשלום',
+    viewDetails: 'צפה בפרטים',
+    noTransactions: 'לא נמצאו עסקאות',
+  },
+  
+  // Reports
+  reports: {
+    title: 'דוחות מס',
+    generateReport: 'צור דוח מס',
+    selectDateRange: 'בחר טווח תאריכים',
+    startDate: 'תאריך התחלה',
+    endDate: 'תאריך סיום',
+    year: 'שנה',
+    generate: 'צור',
+    export: 'ייצא',
+  },
+  
+  // Settings
+  settings: {
+    title: 'הגדרות',
+    database: 'הגדרות מסד נתונים',
+    databasePath: 'נתיב מסד הנתונים',
+    browse: 'עיין',
+    testConnection: 'בדוק חיבור',
+    backupDatabase: 'גבה מסד נתונים',
+    interfaceSettings: 'הגדרות ממשק',
+    virtualKeyboard: 'מקלדת וירטואלית',
+    virtualKeyboardDesc: 'הפעל מקלדת וירטואלית למכשירי מגע',
+    hideOutOfStock: 'הסתר מוצרים אזלו מהמלאי',
+    hideOutOfStockDesc: 'הסתר מוצרים עם מלאי אפס מקטלוג המוצרים',
+    language: 'שפה',
+    languageDesc: 'בחר שפת אפליקציה',
+    taxSettings: 'הגדרות מס',
+    taxRate: 'שיעור מס (%)',
+    taxRateDesc: 'שיעור מס גלובלי לכל המוצרים',
+    save: 'שמור שיעור מס',
+    saved: 'נשמר בהצלחה!',
+    testSuccess: 'חיבור למסד נתונים הצליח!',
+    testFailed: 'בדיקת חיבור נכשלה',
+    backupSuccess: 'גיבוי נוצר בהצלחה!',
+    backupFailed: 'גיבוי נכשל',
+  },
+  
+  // Test
+  test: {
+    title: 'בדיקת מדפסת',
+    testPrint: 'הדפסת בדיקה',
+    selectPrinter: 'בחר מדפסת',
+    print: 'הדפס',
+  },
+  
+  // Header
+  header: {
+    cashier: 'קופאי',
+    store: 'חנות',
+  },
+  
+  // Errors
+  errors: {
+    required: 'שדה זה נדרש',
+    invalidNumber: 'אנא הזן מספר תקין',
+    invalidEmail: 'אנא הזן כתובת אימייל תקינה',
+    generic: 'אירעה שגיאה',
+  },
+};
+

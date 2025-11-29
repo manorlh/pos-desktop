@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { CheckoutDialog } from './CheckoutDialog';
+import { useI18n } from '@/i18n';
 
 interface CartProps {
   onClose?: () => void;
@@ -14,6 +15,7 @@ interface CartProps {
 export function Cart({ onClose }: CartProps) {
   const [showCheckout, setShowCheckout] = useState(false);
   const { cart, removeItem, updateItemQuantity, clearCart } = useCartStore();
+  const { t, locale } = useI18n();
 
   const handleQuantityChange = (itemId: string, newQuantity: number) => {
     if (newQuantity <= 0) {
@@ -29,7 +31,7 @@ export function Cart({ onClose }: CartProps) {
     <div className="flex flex-col h-full bg-card">
       <CardHeader className="border-b border-border">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Current Sale</CardTitle>
+          <CardTitle className="text-lg">{t('pos.currentSale')}</CardTitle>
           <div className="flex items-center gap-2">
             {cart.items.length > 0 && (
               <Button 
@@ -38,7 +40,7 @@ export function Cart({ onClose }: CartProps) {
                 onClick={clearCart}
                 className="hidden sm:inline-flex"
               >
-                Clear All
+                {t('pos.clearAll')}
               </Button>
             )}
             {onClose && (
@@ -60,8 +62,8 @@ export function Cart({ onClose }: CartProps) {
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-muted-foreground">
               <div className="text-4xl mb-2">🛒</div>
-              <p>No items in cart</p>
-              <p className="text-sm">Add products to start a sale</p>
+              <p>{t('pos.noItems')}</p>
+              <p className="text-sm">{t('pos.addProducts')}</p>
             </div>
           </div>
         ) : (
@@ -73,7 +75,7 @@ export function Cart({ onClose }: CartProps) {
                     <div className="flex-1">
                       <h4 className="font-medium text-sm">{item.product.name}</h4>
                       <p className="text-xs text-muted-foreground">
-                        {formatCurrency(item.unitPrice)} each
+                        {formatCurrency(item.unitPrice, locale)} {t('pos.each')}
                       </p>
                     </div>
                     <Button
@@ -109,7 +111,7 @@ export function Cart({ onClose }: CartProps) {
                       </Button>
                     </div>
                     <div className="font-bold text-sm">
-                      {formatCurrency(item.totalPrice)}
+                      {formatCurrency(item.totalPrice, locale)}
                     </div>
                   </div>
                   
@@ -117,8 +119,8 @@ export function Cart({ onClose }: CartProps) {
                     <div className="mt-2">
                       <Badge variant="destructive" className="text-xs">
                         {item.discountType === 'percentage' 
-                          ? `${item.discount}% off` 
-                          : `${formatCurrency(item.discount)} off`
+                          ? `${item.discount}% ${t('common.off')}` 
+                          : `${formatCurrency(item.discount, locale)} ${t('common.off')}`
                         }
                       </Badge>
                     </div>
@@ -134,22 +136,22 @@ export function Cart({ onClose }: CartProps) {
       <div className="border-t border-border p-4 space-y-3">
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
-            <span>Subtotal:</span>
-            <span>{formatCurrency(cart.subtotal)}</span>
+            <span>{t('pos.subtotal')}:</span>
+            <span>{formatCurrency(cart.subtotal, locale)}</span>
           </div>
           {cart.discountAmount > 0 && (
             <div className="flex justify-between text-destructive">
-              <span>Discount:</span>
-              <span>-{formatCurrency(cart.discountAmount)}</span>
+              <span>{t('pos.discount')}:</span>
+              <span>-{formatCurrency(cart.discountAmount, locale)}</span>
             </div>
           )}
           <div className="flex justify-between">
-            <span>Tax:</span>
-            <span>{formatCurrency(cart.taxAmount)}</span>
+            <span>{t('pos.tax')}:</span>
+            <span>{formatCurrency(cart.taxAmount, locale)}</span>
           </div>
           <div className="flex justify-between font-bold text-lg border-t border-border pt-2">
-            <span>Total:</span>
-            <span>{formatCurrency(cart.totalAmount)}</span>
+            <span>{t('pos.total')}:</span>
+            <span>{formatCurrency(cart.totalAmount, locale)}</span>
           </div>
         </div>
 
@@ -160,7 +162,7 @@ export function Cart({ onClose }: CartProps) {
           onClick={() => setShowCheckout(true)}
         >
           <CreditCard className="mr-2 h-4 w-4" />
-          Checkout {canCheckout && `(${cart.items.length} items)`}
+          {t('pos.checkout')} {canCheckout && `(${cart.items.length} ${t('pos.items')})`}
         </Button>
       </div>
 

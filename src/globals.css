@@ -89,3 +89,41 @@
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* RTL Support */
+[dir="rtl"] {
+  direction: rtl;
+}
+
+[dir="ltr"] {
+  direction: ltr;
+}
+
+/* RTL text alignment - only apply to elements without explicit alignment */
+[dir="rtl"] body {
+  text-align: right;
+}
+
+[dir="ltr"] body {
+  text-align: left;
+}
+
+/* RTL-specific adjustments - be more selective */
+[dir="rtl"] .text-left {
+  text-align: right !important;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left !important;
+}
+
+/* RTL for icons in buttons - only for specific button patterns */
+[dir="rtl"] button.flex.items-center.gap-2 > svg:first-child,
+[dir="rtl"] .flex.items-center.gap-2 > svg:first-child:has(+ span) {
+  order: 2;
+}
+
+[dir="rtl"] button.flex.items-center.gap-2 > span:last-child,
+[dir="rtl"] .flex.items-center.gap-2 > span:last-child:has(+ svg) {
+  order: 1;
+}

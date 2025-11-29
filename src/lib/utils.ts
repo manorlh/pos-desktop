@@ -5,15 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
+export function formatCurrency(amount: number, locale: string = 'he-IL'): string {
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency: 'USD',
+    currency: 'ILS',
   }).format(amount)
 }
 
-export function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
+export function formatDate(date: Date, locale: string = 'he-IL'): string {
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -22,8 +22,8 @@ export function formatDate(date: Date): string {
   }).format(date)
 }
 
-export function formatDateShort(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
+export function formatDateShort(date: Date, locale: string = 'he-IL'): string {
+  return new Intl.DateTimeFormat(locale, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

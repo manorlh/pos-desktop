@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { VirtualKeyboardProvider } from './contexts/VirtualKeyboardContext';
+import { I18nProvider } from './i18n';
 import { useProductStore } from './stores/useProductStore';
 import { useTransactionStore } from './stores/useTransactionStore';
 import { useBusinessStore } from './stores/useBusinessStore';
@@ -12,6 +13,7 @@ import './globals.css';
 function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+  const [language, setLanguage] = useState<'he' | 'en'>('he');
   
   const { setProducts, setCategories } = useProductStore();
   const { setCurrentUser } = useTransactionStore();
@@ -101,9 +103,11 @@ function App() {
       const { loadTodaysTransactions } = useTransactionStore.getState();
       await loadTodaysTransactions();
       
-      // Load settings
-      const { loadSettings } = useSettingsStore.getState();
+      // Load settings and set language
+      const { loadSettings, language: settingsLanguage } = useSettingsStore.getState();
       await loadSettings();
+      const currentLanguage = useSettingsStore.getState().language;
+      setLanguage(currentLanguage);
       
       setIsInitializing(false);
     } catch (error: any) {
@@ -117,6 +121,17 @@ function App() {
       setIsInitializing(false);
     }
   };
+
+  // Subscribe to language changes
+  useEffect(() => {
+    const unsubscribe = useSettingsStore.subscribe(
+      (state) => state.language,
+      (newLanguage) => {
+        setLanguage(newLanguage);
+      }
+    );
+    return unsubscribe;
+  }, []);
 
   if (isInitializing) {
     return (
@@ -143,6 +158,14 @@ function App() {
     );
   }
 
+  return (
+    <I18nProvider defaultLanguage={language}>
+      <AppContent />
+    </I18nProvider>
+  );
+}
+
+function AppContent() {
   return (
     <VirtualKeyboardProvider>
       <div className="h-screen bg-background">

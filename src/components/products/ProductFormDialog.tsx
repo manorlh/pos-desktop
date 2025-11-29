@@ -20,6 +20,7 @@ import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useProductStore } from '@/stores/useProductStore';
 import { useVirtualKeyboard } from '@/contexts/VirtualKeyboardContext';
+import { useI18n } from '@/i18n';
 import type { Product } from '@/types/index';
 import { generateUUID } from '@/utils/uuid';
 
@@ -32,6 +33,7 @@ interface ProductFormDialogProps {
 export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDialogProps) {
   const { categories, addProduct, updateProduct } = useProductStore();
   const { isOpen: isKeyboardOpen } = useVirtualKeyboard();
+  const { t } = useI18n();
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -82,25 +84,25 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
     const newErrors: Record<string, string> = {};
 
     if (!formData.name.trim()) {
-      newErrors.name = 'Product name is required';
+      newErrors.name = t('products.nameRequired');
     }
 
     if (!formData.price.trim()) {
-      newErrors.price = 'Price is required';
+      newErrors.price = t('products.priceRequired');
     } else if (isNaN(parseFloat(formData.price)) || parseFloat(formData.price) < 0) {
-      newErrors.price = 'Price must be a valid positive number';
+      newErrors.price = t('products.priceInvalid');
     }
 
     if (!formData.sku.trim()) {
-      newErrors.sku = 'SKU is required';
+      newErrors.sku = t('products.skuRequired');
     }
 
     if (!formData.categoryId) {
-      newErrors.categoryId = 'Category is required';
+      newErrors.categoryId = t('products.categoryRequired');
     }
 
     if (formData.stockQuantity && (isNaN(parseInt(formData.stockQuantity)) || parseInt(formData.stockQuantity) < 0)) {
-      newErrors.stockQuantity = 'Stock quantity must be a valid non-negative number';
+      newErrors.stockQuantity = t('products.stockInvalid');
     }
 
     setErrors(newErrors);
@@ -143,7 +145,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save product:', error);
-      setErrors({ submit: 'Failed to save product. Please try again.' });
+      setErrors({ submit: t('errors.generic') });
     } finally {
       setIsLoading(false);
     }
@@ -161,39 +163,39 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
     <Dialog modal={true} open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{product ? 'Edit Product' : 'Create New Product'}</DialogTitle>
+          <DialogTitle>{product ? t('products.editProduct') : t('products.createProduct')}</DialogTitle>
           <DialogDescription>
-            {product ? 'Update product information below.' : 'Fill in the product details below.'}
+            {product ? t('products.description') : t('products.description')}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Product Name *</Label>
+              <Label htmlFor="name">{t('products.productName')} *</Label>
               <Input
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Enter product name"
+                placeholder={t('products.productName')}
                 className={errors.name ? 'border-destructive' : ''}
               />
               {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t('products.productDescription')}</Label>
               <Input
                 id="description"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Enter product description"
+                placeholder={t('products.productDescription')}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="price">Price (including tax) *</Label>
+                <Label htmlFor="price">{t('products.price')} *</Label>
                 <Input
                   id="price"
                   type="number"
@@ -204,16 +206,16 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
                   className={errors.price ? 'border-destructive' : ''}
                 />
                 {errors.price && <p className="text-sm text-destructive">{errors.price}</p>}
-                <p className="text-xs text-muted-foreground">Price includes tax</p>
+                <p className="text-xs text-muted-foreground">{t('products.price')}</p>
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="sku">SKU *</Label>
+                <Label htmlFor="sku">{t('products.sku')} *</Label>
                 <Input
                   id="sku"
                   value={formData.sku}
                   onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                  placeholder="Enter SKU"
+                  placeholder={t('products.sku')}
                   className={errors.sku ? 'border-destructive' : ''}
                 />
                 {errors.sku && <p className="text-sm text-destructive">{errors.sku}</p>}
@@ -221,16 +223,16 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="categoryId">Category *</Label>
+              <Label htmlFor="categoryId">{t('products.category')} *</Label>
               <Select
                 value={formData.categoryId}
                 onValueChange={(value) => setFormData({ ...formData, categoryId: value })}
               >
                 <SelectTrigger className={errors.categoryId ? 'border-destructive' : ''}>
-                  <SelectValue placeholder="Select a category" />
+                  <SelectValue placeholder={t('products.selectCategory')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((category) => (
+                  {categories.map((category: any) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
                     </SelectItem>
@@ -242,7 +244,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="stockQuantity">Stock Quantity</Label>
+                <Label htmlFor="stockQuantity">{t('products.stockQuantity')}</Label>
                 <Input
                   id="stockQuantity"
                   type="number"
@@ -256,12 +258,12 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="barcode">Barcode</Label>
+              <Label htmlFor="barcode">{t('products.barcode')}</Label>
               <Input
                 id="barcode"
                 value={formData.barcode}
                 onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                placeholder="Enter barcode"
+                placeholder={t('products.barcode')}
               />
             </div>
 
@@ -271,7 +273,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
                 id="imageUrl"
                 value={formData.imageUrl}
                 onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-                placeholder="Enter image URL"
+                placeholder="Image URL"
               />
             </div>
 
@@ -282,7 +284,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
                 onCheckedChange={(checked) => setFormData({ ...formData, inStock: checked })}
               />
               <Label htmlFor="inStock" className="cursor-pointer">
-                Product is available
+                {t('products.available')}
               </Label>
             </div>
 
@@ -296,10 +298,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
               onClick={() => onOpenChange(false)}
               disabled={isLoading}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? 'Saving...' : product ? 'Update Product' : 'Create Product'}
+              {isLoading ? t('common.loading') : product ? t('products.editProduct') : t('products.createProduct')}
             </Button>
           </DialogFooter>
         </form>

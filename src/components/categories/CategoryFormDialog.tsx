@@ -19,6 +19,7 @@ import {
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { useProductStore } from '@/stores/useProductStore';
+import { useI18n } from '@/i18n';
 import type { Category } from '@/types/index';
 import { generateUUID } from '@/utils/uuid';
 
@@ -30,6 +31,7 @@ interface CategoryFormDialogProps {
 
 export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFormDialogProps) {
   const { categories, addCategory, updateCategory } = useProductStore();
+  const { t } = useI18n();
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -77,16 +79,16 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
     const newErrors: Record<string, string> = {};
 
     if (!formData.name.trim()) {
-      newErrors.name = 'Category name is required';
+      newErrors.name = t('categories.nameRequired');
     }
 
     if (formData.sortOrder && (isNaN(parseInt(formData.sortOrder)))) {
-      newErrors.sortOrder = 'Sort order must be a valid number';
+      newErrors.sortOrder = t('errors.invalidNumber');
     }
 
     // Validate color format (hex color)
     if (formData.color && !/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(formData.color)) {
-      newErrors.color = 'Color must be a valid hex color (e.g., #3b82f6)';
+      newErrors.color = t('errors.invalidNumber');
     }
 
     setErrors(newErrors);
@@ -126,7 +128,7 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save category:', error);
-      setErrors({ submit: 'Failed to save category. Please try again.' });
+      setErrors({ submit: t('errors.generic') });
     } finally {
       setIsLoading(false);
     }
@@ -136,39 +138,39 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{category ? 'Edit Category' : 'Create New Category'}</DialogTitle>
+          <DialogTitle>{category ? t('categories.editCategory') : t('categories.createCategory')}</DialogTitle>
           <DialogDescription>
-            {category ? 'Update category information below.' : 'Fill in the category details below.'}
+            {t('categories.description')}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Category Name *</Label>
+              <Label htmlFor="name">{t('categories.categoryName')} *</Label>
               <Input
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Enter category name"
+                placeholder={t('categories.categoryName')}
                 className={errors.name ? 'border-destructive' : ''}
               />
               {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t('categories.categoryDescription')}</Label>
               <Input
                 id="description"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Enter category description"
+                placeholder={t('categories.categoryDescription')}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="color">Color</Label>
+                <Label htmlFor="color">{t('categories.color')}</Label>
                 <div className="flex gap-2">
                   <Input
                     id="color"
@@ -202,16 +204,16 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="parentId">Parent Category (Optional)</Label>
+              <Label htmlFor="parentId">{t('categories.parentCategory')}</Label>
               <Select
                 value={formData.parentId}
                 onValueChange={(value) => setFormData({ ...formData, parentId: value })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a parent category (optional)" />
+                  <SelectValue placeholder={t('categories.parentCategory')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">None (Top-level category)</SelectItem>
+                  <SelectItem value="__none__">{t('categories.none')}</SelectItem>
                   {availableParents.map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>
                       {cat.name}
@@ -227,7 +229,7 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
                 id="imageUrl"
                 value={formData.imageUrl}
                 onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-                placeholder="Enter image URL"
+                placeholder="Image URL"
               />
             </div>
 
@@ -238,7 +240,7 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
                 onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
               />
               <Label htmlFor="isActive" className="cursor-pointer">
-                Category is active
+                {t('categories.active')}
               </Label>
             </div>
 
@@ -252,10 +254,10 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
               onClick={() => onOpenChange(false)}
               disabled={isLoading}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? 'Saving...' : category ? 'Update Category' : 'Create Category'}
+              {isLoading ? t('common.loading') : category ? t('categories.editCategory') : t('categories.createCategory')}
             </Button>
           </DialogFooter>
         </form>

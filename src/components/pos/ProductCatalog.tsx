@@ -7,6 +7,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { formatCurrency, cn } from '@/lib/utils';
+import { useI18n } from '@/i18n';
 
 export function ProductCatalog() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -19,6 +20,7 @@ export function ProductCatalog() {
     setSearchQuery 
   } = useProductStore();
   const { addItem } = useCartStore();
+  const { t, locale } = useI18n();
 
   const handleAddToCart = (productId: string) => {
     const product = filteredProducts.find(p => p.id === productId);
@@ -35,7 +37,7 @@ export function ProductCatalog() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search products..."
+              placeholder={t('common.search') + '...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
@@ -66,7 +68,7 @@ export function ProductCatalog() {
             size="sm"
             onClick={() => setSelectedCategory(null)}
           >
-            All Categories
+            {t('common.all')} {t('nav.categories')}
           </Button>
           {categories.filter(category => category.isActive).map((category) => (
             <Button
@@ -105,7 +107,7 @@ export function ProductCatalog() {
                   </p>
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-primary text-xs sm:text-sm">
-                      {formatCurrency(product.price)}
+                      {formatCurrency(product.price, locale)}
                     </span>
                     <Badge variant="secondary" className="text-xs">
                       {product.stockQuantity}
@@ -143,13 +145,13 @@ export function ProductCatalog() {
                           {categories.find(c => c.id === product.categoryId)?.name}
                         </Badge>
                         <Badge variant="secondary" className="text-xs">
-                          Stock: {product.stockQuantity}
+                          {t('pos.stock')}: {product.stockQuantity}
                         </Badge>
                       </div>
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-lg text-primary">
-                        {formatCurrency(product.price)}
+                        {formatCurrency(product.price, locale)}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         SKU: {product.sku}
@@ -164,7 +166,7 @@ export function ProductCatalog() {
 
         {filteredProducts.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No products found</p>
+            <p className="text-muted-foreground">{t('common.noResults')}</p>
           </div>
         )}
       </div>

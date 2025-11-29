@@ -2,6 +2,7 @@ import { Clock, Menu } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatDate } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { useI18n } from '@/i18n';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -9,6 +10,7 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const { t, locale } = useI18n();
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -31,12 +33,12 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Menu className="h-5 w-5" />
           </Button>
         )}
-        <h2 className="text-lg font-semibold">Point of Sale</h2>
+        <h2 className="text-lg font-semibold">{t('pos.title')}</h2>
       </div>
       
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Clock className="h-4 w-4" />
-        <span className="hidden sm:inline">{formatDate(currentTime)}</span>
+        <span className="hidden sm:inline">{formatDate(currentTime, locale)}</span>
       </div>
     </header>
   );

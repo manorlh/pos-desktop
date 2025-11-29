@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useProductStore } from '@/stores/useProductStore';
+import { useI18n } from '@/i18n';
 
 export function SettingsPage() {
   const [dbPath, setDbPath] = useState<string>('');
@@ -15,8 +17,9 @@ export function SettingsPage() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
-  const { virtualKeyboardEnabled, globalTaxRate, hideOutOfStockProducts, loadSettings, setVirtualKeyboardEnabled, setGlobalTaxRate, setHideOutOfStockProducts } = useSettingsStore();
+  const { virtualKeyboardEnabled, globalTaxRate, hideOutOfStockProducts, language, loadSettings, setVirtualKeyboardEnabled, setGlobalTaxRate, setHideOutOfStockProducts, setLanguage } = useSettingsStore();
   const { filterProducts } = useProductStore();
+  const { t, setLanguage: setI18nLanguage } = useI18n();
   const [taxRateInput, setTaxRateInput] = useState<string>('');
 
   useEffect(() => {
@@ -309,10 +312,10 @@ export function SettingsPage() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label htmlFor="hide-out-of-stock" className="text-base">
-                Hide Out of Stock Products
+                {t('settings.hideOutOfStock')}
               </Label>
               <p className="text-sm text-muted-foreground">
-                Hide products with zero stock from the product catalog
+                {t('settings.hideOutOfStockDesc')}
               </p>
             </div>
             <Switch
@@ -324,6 +327,30 @@ export function SettingsPage() {
                 filterProducts();
               }}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="language" className="text-base">
+              {t('settings.language')}
+            </Label>
+            <Select
+              value={language}
+              onValueChange={async (value: 'he' | 'en') => {
+                setI18nLanguage(value);
+                await setLanguage(value);
+              }}
+            >
+              <SelectTrigger id="language">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="he">עברית (Hebrew)</SelectItem>
+                <SelectItem value="en">English</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.languageDesc')}
+            </p>
           </div>
         </CardContent>
       </Card>

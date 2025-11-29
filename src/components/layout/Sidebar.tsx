@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { useI18n } from '@/i18n';
 import type { ViewType } from '@/types/layout';
 
 interface SidebarProps {
@@ -20,17 +21,18 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
-const navigation = [
-  { id: 'pos' as ViewType, name: 'Point of Sale', icon: ShoppingCart },
-  { id: 'transactions' as ViewType, name: 'Transactions', icon: Receipt },
-  { id: 'products' as ViewType, name: 'Products', icon: Package },
-  { id: 'categories' as ViewType, name: 'Categories', icon: FolderTree },
-  { id: 'reports' as ViewType, name: 'Tax Reports', icon: FileText },
-  { id: 'test' as ViewType, name: 'Printer Test', icon: TestTube },
-  { id: 'settings' as ViewType, name: 'Settings', icon: Settings },
-];
-
 export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: SidebarProps) {
+  const { t } = useI18n();
+  
+  const navigation = [
+    { id: 'pos' as ViewType, name: t('nav.pos'), icon: ShoppingCart },
+    { id: 'transactions' as ViewType, name: t('nav.transactions'), icon: Receipt },
+    { id: 'products' as ViewType, name: t('nav.products'), icon: Package },
+    { id: 'categories' as ViewType, name: t('nav.categories'), icon: FolderTree },
+    { id: 'reports' as ViewType, name: t('nav.reports'), icon: FileText },
+    { id: 'test' as ViewType, name: t('nav.test'), icon: TestTube },
+    { id: 'settings' as ViewType, name: t('nav.settings'), icon: Settings },
+  ];
   return (
     <aside
       className={cn(
@@ -46,7 +48,7 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
             <Store className="h-8 w-8 text-primary" />
             <div>
               <h1 className="text-xl font-bold">POS Desktop</h1>
-              <p className="text-sm text-muted-foreground">Point of Sale System</p>
+              <p className="text-sm text-muted-foreground">{t('pos.title')}</p>
             </div>
           </div>
           {/* Close button for mobile/tablet */}
@@ -84,8 +86,8 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
       
       <div className="p-4 border-t border-border">
         <div className="text-sm text-muted-foreground">
-          <p>Cashier: John Doe</p>
-          <p>Store #001</p>
+          <p>{t('header.cashier')}: John Doe</p>
+          <p>{t('header.store')} #001</p>
         </div>
       </div>
     </aside>
