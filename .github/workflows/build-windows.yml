@@ -34,17 +34,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
+      - name: List release files
+        run: |
+          Get-ChildItem -Path release -Recurse -File | Select-Object FullName, Length | Format-Table -AutoSize
+        shell: pwsh
+      
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: release/*/*.exe
+          path: release/**/*Setup*.exe
           retention-days: 30
+          if-no-files-found: error
       
       - name: Upload Windows installer blockmap
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer-blockmap
-          path: release/*/*.exe.blockmap
+          path: release/**/*.exe.blockmap
           retention-days: 30
+          if-no-files-found: ignore
 
