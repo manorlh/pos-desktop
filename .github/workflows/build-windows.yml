@@ -40,19 +40,16 @@ jobs:
           Get-ChildItem -Path release -Recurse -File | Select-Object FullName, @{Name="Size(MB)";Expression={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
         shell: pwsh
       
-      - name: Find Windows installer
-        id: find-installer
+      - name: Copy installer to known location
         run: |
           $installer = Get-ChildItem -Path release -Recurse -Filter "*Setup*.exe" -File | Where-Object { $_.Extension -eq ".exe" -and $_.Name -notlike "*.blockmap" } | Select-Object -First 1
           if ($installer) {
             Write-Host "Found installer: $($installer.FullName)"
             Write-Host "Size: $([math]::Round($installer.Length/1MB,2)) MB"
-            $relativePath = $installer.FullName.Replace((Get-Location).Path + "\", "").Replace("\", "/")
-            Write-Host "Relative path: $relativePath"
-            Write-Host "installer_path=$relativePath" >> $env:GITHUB_OUTPUT
+            Copy-Item -Path $installer.FullName -Destination "installer.exe" -Force
+            Write-Host "Copied to installer.exe"
           } else {
             Write-Host "ERROR: Installer not found!"
-            Get-ChildItem -Path release -Recurse -File | Select-Object FullName | Format-Table
             exit 1
           }
         shell: pwsh
@@ -61,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: ${{ steps.find-installer.outputs.installer_path }}
+          path: installer.exe
           retention-days: 30
           if-no-files-found: error
       
