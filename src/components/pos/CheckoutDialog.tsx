@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DollarSign, Check } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
+import { useProductStore } from '@/stores/useProductStore';
 import { 
   Dialog, 
   DialogContent, 
@@ -25,6 +26,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   
   const { cart, clearCart } = useCartStore();
   const { addTransaction } = useTransactionStore();
+  const { loadProducts } = useProductStore();
 
   const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount);
   const canComplete = parseFloat(amountTendered || '0') >= cart.totalAmount;
@@ -41,6 +43,9 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         amountTendered: amountTenderedNum,
         changeAmount: changeAmount,
       });
+      
+      // Reload products to reflect updated stock quantities
+      await loadProducts();
       
       setIsComplete(true);
       

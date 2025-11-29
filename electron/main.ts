@@ -390,13 +390,22 @@ function loadTransactionWithRelations(db: any, row: any): any {
   }).filter(Boolean);
   
   // Calculate cart totals
-  const subtotal = items.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
-  const taxAmount = items.reduce((sum: number, item: any) => {
-    const taxRate = item.product.taxRate || 0;
-    return sum + (item.totalPrice * taxRate / 100);
-  }, 0);
+  // All prices are tax-inclusive, so we need to extract tax from them
+  // Get global tax rate from settings
+  const taxRateStr = getSetting(db, 'globalTaxRate');
+  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.08; // Default to 8% if not set
+  
+  // Total with tax (all prices are tax-inclusive)
+  const totalWithTax = items.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
   const discountAmount = items.reduce((sum: number, item: any) => sum + (item.discount || 0), 0);
-  const totalAmount = subtotal + taxAmount - discountAmount;
+  const discountedTotalWithTax = totalWithTax - discountAmount;
+  
+  // Extract tax from tax-inclusive price
+  // subtotal = price / (1 + taxRate)
+  // taxAmount = price - subtotal
+  const subtotal = discountedTotalWithTax / (1 + taxRate);
+  const taxAmount = discountedTotalWithTax - subtotal;
+  const totalAmount = discountedTotalWithTax; // Total is already tax-inclusive
   
   const cart = {
     id: row.id,
@@ -550,6 +559,31 @@ function saveTransaction(db: any, transaction: any): void {
         item.notes || null
       );
     }
+    
+    // Update product stock quantities if transaction is completed
+    if (transaction.status === 'completed') {
+      for (const item of transaction.cart.items) {
+        // Get current stock
+        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId);
+        if (product) {
+          const newStockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          const updateProductStock = db.prepare(`
+            UPDATE products 
+            SET stockQuantity = ?,
+                inStock = ?,
+                updatedAt = ?
+            WHERE id = ?
+          `);
+          
+          updateProductStock.run(
+            newStockQuantity,
+            newStockQuantity > 0 ? 1 : 0,
+            new Date().toISOString(),
+            item.productId
+          );
+        }
+      }
+    }
   });
   
   trans();
@@ -624,6 +658,16 @@ function saveSoftwareInfo(db: any, info: any): void {
     info.softwareType,
     new Date().toISOString()
   );
+}
+
+function getSetting(db: any, key: string): string | null {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setSetting(db: any, key: string, value: string): void {
+  const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  stmt.run(key, value);
 }
 
 // ============================================================================
@@ -994,7 +1038,13 @@ ipcMain.handle('select-export-directory', async () => {
 
 ipcMain.handle('generate-tax-report', async (event, options) => {
   try {
-    const { transactions, businessInfo, softwareInfo, taxReportConfig, dateRange, drive, useCustomPath } = options;
+    const { transactions, businessInfo, softwareInfo, taxReportConfig, dateRange, drive, useCustomPath, globalTaxRate } = options;
+    const db = getDatabaseMain();
+    // Use provided globalTaxRate or get from settings
+    const taxRate = globalTaxRate || (() => {
+      const taxRateStr = getSetting(db, 'globalTaxRate');
+      return taxRateStr ? parseFloat(taxRateStr) : 8; // Default to 8% if not set
+    })();
     
     // Import the tax report generator (we'll need to adapt it for Node.js)
     // For now, we'll implement the core logic here
@@ -1143,7 +1193,8 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
         d110 += formatAmount(item.unitPrice, 15);
         d110 += item.lineDiscount ? formatAmount(-Math.abs(item.lineDiscount), 15) : padRight('', 15);
         d110 += formatAmount(item.totalPrice, 15);
-        const vatPercent = item.product.taxRate ? Math.round(item.product.taxRate * 100) : 0;
+        // Use global tax rate (already retrieved at function start)
+        const vatPercent = Math.round(taxRate);
         d110 += padLeft(vatPercent.toString(), 2, '0');
         d110 += transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7);
         d110 += formatDate(transaction.createdAt);
@@ -1624,6 +1675,37 @@ ipcMain.handle('db-save-software-info', async (event, info: any) => {
     return { success: true };
   } catch (error: any) {
     console.error('Error saving software info:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-setting', async (event, key: string) => {
+  try {
+    const db = getDatabaseMain();
+    return getSetting(db, key);
+  } catch (error: any) {
+    // If database is not initialized, return null (default value)
+    if (error.message === 'Database not initialized') {
+      console.warn('Database not initialized when getting setting:', key);
+      return null;
+    }
+    console.error('Error getting setting:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-save-setting', async (event, key: string, value: string) => {
+  try {
+    const db = getDatabaseMain();
+    setSetting(db, key, value);
+    return { success: true };
+  } catch (error: any) {
+    // If database is not initialized, return error
+    if (error.message === 'Database not initialized') {
+      console.warn('Database not initialized when saving setting:', key);
+      return { success: false, error: 'Database not initialized' };
+    }
+    console.error('Error saving setting:', error);
     return { success: false, error: error.message };
   }
 });

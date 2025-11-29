@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Alert, AlertDescription } from '../ui/alert';
+import { Switch } from '../ui/switch';
+import { Label } from '../ui/label';
+import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useProductStore } from '@/stores/useProductStore';
 
 export function SettingsPage() {
   const [dbPath, setDbPath] = useState<string>('');
@@ -11,10 +15,35 @@ export function SettingsPage() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const { virtualKeyboardEnabled, globalTaxRate, hideOutOfStockProducts, loadSettings, setVirtualKeyboardEnabled, setGlobalTaxRate, setHideOutOfStockProducts } = useSettingsStore();
+  const { filterProducts } = useProductStore();
+  const [taxRateInput, setTaxRateInput] = useState<string>('');
 
   useEffect(() => {
     loadDatabasePath();
+    loadSettings();
   }, []);
+
+  useEffect(() => {
+    // Update tax rate input when globalTaxRate changes
+    if (globalTaxRate !== undefined) {
+      setTaxRateInput((globalTaxRate * 100).toFixed(2));
+    }
+  }, [globalTaxRate]);
+
+  const handleTaxRateChange = (value: string) => {
+    setTaxRateInput(value);
+  };
+
+  const handleSaveTaxRate = async () => {
+    const rate = parseFloat(taxRateInput);
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      setTestResult({ success: false, message: 'Tax rate must be a number between 0 and 100' });
+      return;
+    }
+    await setGlobalTaxRate(rate);
+    setTestResult({ success: true, message: 'Tax rate saved successfully!' });
+  };
 
   const loadDatabasePath = async () => {
     try {
@@ -210,6 +239,91 @@ export function SettingsPage() {
               <li>The database file contains all your products, transactions, and settings</li>
               <li>Ensure the selected path has write permissions</li>
             </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Percent className="h-5 w-5" />
+            Tax Settings
+          </CardTitle>
+          <CardDescription>
+            Configure global tax rate for all products
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tax-rate">Global Tax Rate (%)</Label>
+            <div className="flex gap-2">
+              <Input
+                id="tax-rate"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={taxRateInput}
+                onChange={(e) => handleTaxRateChange(e.target.value)}
+                placeholder="8.00"
+                className="flex-1"
+              />
+              <Button onClick={handleSaveTaxRate}>
+                Save
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              All product prices include tax. This rate is used to calculate tax breakdown in receipts.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Keyboard className="h-5 w-5" />
+            Interface Settings
+          </CardTitle>
+          <CardDescription>
+            Configure interface and input settings
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="virtual-keyboard" className="text-base">
+                Virtual Keyboard
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Enable or disable the virtual keyboard for touch input
+              </p>
+            </div>
+            <Switch
+              id="virtual-keyboard"
+              checked={virtualKeyboardEnabled}
+              onCheckedChange={setVirtualKeyboardEnabled}
+            />
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="hide-out-of-stock" className="text-base">
+                Hide Out of Stock Products
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Hide products with zero stock from the product catalog
+              </p>
+            </div>
+            <Switch
+              id="hide-out-of-stock"
+              checked={hideOutOfStockProducts}
+              onCheckedChange={async (checked) => {
+                await setHideOutOfStockProducts(checked);
+                // Re-filter products to reflect the setting change
+                filterProducts();
+              }}
+            />
           </div>
         </CardContent>
       </Card>

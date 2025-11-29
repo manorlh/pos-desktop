@@ -5,6 +5,7 @@ import { useProductStore } from './stores/useProductStore';
 import { useTransactionStore } from './stores/useTransactionStore';
 import { useBusinessStore } from './stores/useBusinessStore';
 import { useDatabaseStore } from './stores/useDatabaseStore';
+import { useSettingsStore } from './stores/useSettingsStore';
 import { mockProducts, mockCategories, mockUser } from './data/mockData';
 import './globals.css';
 
@@ -99,6 +100,10 @@ function App() {
       // Load today's transactions
       const { loadTodaysTransactions } = useTransactionStore.getState();
       await loadTodaysTransactions();
+      
+      // Load settings
+      const { loadSettings } = useSettingsStore.getState();
+      await loadSettings();
       
       setIsInitializing(false);
     } catch (error: any) {

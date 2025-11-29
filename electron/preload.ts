@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbSaveBusinessInfo: (info: any) => ipcRenderer.invoke('db-save-business-info', info),
   dbGetSoftwareInfo: () => ipcRenderer.invoke('db-get-software-info'),
   dbSaveSoftwareInfo: (info: any) => ipcRenderer.invoke('db-save-software-info', info),
+  dbGetSetting: (key: string) => ipcRenderer.invoke('db-get-setting', key),
+  dbSaveSetting: (key: string, value: string) => ipcRenderer.invoke('db-save-setting', key, value),
   
   onMenuNewSale: (callback: () => void) => {
     ipcRenderer.on('menu-new-sale', callback);

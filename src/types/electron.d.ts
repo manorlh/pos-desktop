@@ -21,6 +21,7 @@ interface TaxReportOptions {
   dateRange: { start: Date; end: Date } | { year: number };
   drive: string;
   useCustomPath?: boolean;
+  globalTaxRate?: number; // Tax rate as percentage (e.g., 8 for 8%)
 }
 
 interface TaxReportResult {
@@ -68,6 +69,8 @@ interface ElectronAPI {
   dbSaveBusinessInfo: (info: any) => Promise<{ success: boolean; error?: string }>;
   dbGetSoftwareInfo: () => Promise<any | null>;
   dbSaveSoftwareInfo: (info: any) => Promise<{ success: boolean; error?: string }>;
+  dbGetSetting: (key: string) => Promise<string | null>;
+  dbSaveSetting: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
   
   onMenuNewSale: (callback: () => void) => void;
   onMainProcessMessage: (callback: (message: string) => void) => void;

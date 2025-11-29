@@ -268,7 +268,7 @@ export function buildD110Record(
   record += formatAmount(item.totalPrice, 15);
   
   // Field: VAT Percent (2) - columns 286-287
-  const vatPercent = item.product.taxRate ? Math.round(item.product.taxRate * 100) : 0;
+  const vatPercent = globalTaxRate ? Math.round(globalTaxRate) : 8; // Default to 8% if not provided
   record += padLeft(vatPercent.toString(), 2, '0');
   
   // Field: Branch ID (7) - columns 288-294
@@ -421,7 +421,8 @@ export function generateTaxReport(
   softwareInfo: SoftwareInfo,
   taxReportConfig: TaxReportConfig,
   dateRange: { start: Date; end: Date } | { year: number },
-  outputPath: string
+  outputPath: string,
+  globalTaxRate?: number // Optional global tax rate (as percentage, e.g., 8 for 8%)
 ): { iniContent: string[]; bkmvContent: string[]; recordCounts: RecordCounts; uniqueId: string } {
   const uniqueId = generateUniqueFileId();
   const recordCounts: RecordCounts = {
@@ -450,7 +451,7 @@ export function generateTaxReport(
     // D110 - Document details (one per cart item)
     let lineNumber = 1;
     for (const item of transaction.cart.items) {
-      bkmvLines.push(buildD110Record(transaction, item, lineNumber, businessInfo.vatNumber, recordNumber));
+      bkmvLines.push(buildD110Record(transaction, item, lineNumber, businessInfo.vatNumber, recordNumber, globalTaxRate));
       recordCounts.D110++;
       recordNumber++;
       lineNumber++;

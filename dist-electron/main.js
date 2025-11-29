@@ -325,13 +325,14 @@ function loadTransactionWithRelations(db, row) {
       lineDiscount: itemRow.lineDiscount || void 0
     };
   }).filter(Boolean);
-  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-  const taxAmount = items.reduce((sum, item) => {
-    const taxRate = item.product.taxRate || 0;
-    return sum + item.totalPrice * taxRate / 100;
-  }, 0);
+  const taxRateStr = getSetting(db, "globalTaxRate");
+  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.08;
+  const totalWithTax = items.reduce((sum, item) => sum + item.totalPrice, 0);
   const discountAmount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
-  const totalAmount = subtotal + taxAmount - discountAmount;
+  const discountedTotalWithTax = totalWithTax - discountAmount;
+  const subtotal = discountedTotalWithTax / (1 + taxRate);
+  const taxAmount = discountedTotalWithTax - subtotal;
+  const totalAmount = discountedTotalWithTax;
   const cart = {
     id: row.id,
     items,
@@ -460,6 +461,27 @@ function saveTransaction(db, transaction) {
         item.notes || null
       );
     }
+    if (transaction.status === "completed") {
+      for (const item of transaction.cart.items) {
+        const product = db.prepare("SELECT stockQuantity FROM products WHERE id = ?").get(item.productId);
+        if (product) {
+          const newStockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          const updateProductStock = db.prepare(`
+            UPDATE products 
+            SET stockQuantity = ?,
+                inStock = ?,
+                updatedAt = ?
+            WHERE id = ?
+          `);
+          updateProductStock.run(
+            newStockQuantity,
+            newStockQuantity > 0 ? 1 : 0,
+            (/* @__PURE__ */ new Date()).toISOString(),
+            item.productId
+          );
+        }
+      }
+    }
   });
   trans();
 }
@@ -527,6 +549,14 @@ function saveSoftwareInfo(db, info) {
     info.softwareType,
     (/* @__PURE__ */ new Date()).toISOString()
   );
+}
+function getSetting(db, key) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+  return row ? row.value : null;
+}
+function setSetting(db, key, value) {
+  const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+  stmt.run(key, value);
 }
 process.env.DIST = path.join(__dirname$1, "../dist");
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, "../public");
@@ -829,7 +859,12 @@ ipcMain.handle("select-export-directory", async () => {
 });
 ipcMain.handle("generate-tax-report", async (event, options) => {
   try {
-    const { transactions, businessInfo, softwareInfo, taxReportConfig, dateRange, drive, useCustomPath } = options;
+    const { transactions, businessInfo, softwareInfo, taxReportConfig, dateRange, drive, useCustomPath, globalTaxRate } = options;
+    const db = getDatabaseMain();
+    const taxRate = globalTaxRate || (() => {
+      const taxRateStr = getSetting(db, "globalTaxRate");
+      return taxRateStr ? parseFloat(taxRateStr) : 8;
+    })();
     const vat8 = businessInfo.vatNumber.substring(0, 8).padStart(8, "0");
     const year = "year" in dateRange ? String(dateRange.year).slice(-2) : String(dateRange.start.getFullYear()).slice(-2);
     const now = /* @__PURE__ */ new Date();
@@ -941,7 +976,7 @@ ipcMain.handle("generate-tax-report", async (event, options) => {
         d110 += formatAmount(item.unitPrice, 15);
         d110 += item.lineDiscount ? formatAmount(-Math.abs(item.lineDiscount), 15) : padRight("", 15);
         d110 += formatAmount(item.totalPrice, 15);
-        const vatPercent = item.product.taxRate ? Math.round(item.product.taxRate * 100) : 0;
+        const vatPercent = Math.round(taxRate);
         d110 += padLeft(vatPercent.toString(), 2, "0");
         d110 += transaction.branchId ? padRight(transaction.branchId, 7) : padRight("", 7);
         d110 += formatDate(transaction.createdAt);
@@ -1356,6 +1391,33 @@ ipcMain.handle("db-save-software-info", async (event, info) => {
     return { success: true };
   } catch (error) {
     console.error("Error saving software info:", error);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("db-get-setting", async (event, key) => {
+  try {
+    const db = getDatabaseMain();
+    return getSetting(db, key);
+  } catch (error) {
+    if (error.message === "Database not initialized") {
+      console.warn("Database not initialized when getting setting:", key);
+      return null;
+    }
+    console.error("Error getting setting:", error);
+    return null;
+  }
+});
+ipcMain.handle("db-save-setting", async (event, key, value) => {
+  try {
+    const db = getDatabaseMain();
+    setSetting(db, key, value);
+    return { success: true };
+  } catch (error) {
+    if (error.message === "Database not initialized") {
+      console.warn("Database not initialized when saving setting:", key);
+      return { success: false, error: "Database not initialized" };
+    }
+    console.error("Error saving setting:", error);
     return { success: false, error: error.message };
   }
 });

@@ -246,13 +246,22 @@ function loadTransactionWithRelations(db: any, row: TransactionRow): Transaction
   });
   
   // Calculate cart totals
-  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-  const taxAmount = items.reduce((sum, item) => {
-    const taxRate = item.product.taxRate || 0;
-    return sum + (item.totalPrice * taxRate / 100);
-  }, 0);
+  // All prices are tax-inclusive, so we need to extract tax from them
+  // Get global tax rate from settings
+  const taxRateStr = getSetting(db, 'globalTaxRate');
+  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.08; // Default to 8% if not set
+  
+  // Total with tax (all prices are tax-inclusive)
+  const totalWithTax = items.reduce((sum, item) => sum + item.totalPrice, 0);
   const discountAmount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
-  const totalAmount = subtotal + taxAmount - discountAmount;
+  const discountedTotalWithTax = totalWithTax - discountAmount;
+  
+  // Extract tax from tax-inclusive price
+  // subtotal = price / (1 + taxRate)
+  // taxAmount = price - subtotal
+  const subtotal = discountedTotalWithTax / (1 + taxRate);
+  const taxAmount = discountedTotalWithTax - subtotal;
+  const totalAmount = discountedTotalWithTax; // Total is already tax-inclusive
   
   const cart = {
     id: row.id,
@@ -340,6 +349,31 @@ export function saveTransaction(db: any, transaction: Transaction): void {
         item.lineDiscount || null,
         item.notes || null
       );
+    }
+    
+    // Update product stock quantities if transaction is completed
+    if (transaction.status === 'completed') {
+      for (const item of transaction.cart.items) {
+        // Get current stock
+        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId);
+        if (product) {
+          const newStockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          const updateProductStock = db.prepare(`
+            UPDATE products 
+            SET stockQuantity = ?,
+                inStock = ?,
+                updatedAt = ?
+            WHERE id = ?
+          `);
+          
+          updateProductStock.run(
+            newStockQuantity,
+            newStockQuantity > 0 ? 1 : 0,
+            new Date().toISOString(),
+            item.productId
+          );
+        }
+      }
     }
   });
   

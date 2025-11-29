@@ -68,7 +68,7 @@ export function ProductCatalog() {
           >
             All Categories
           </Button>
-          {categories.map((category) => (
+          {categories.filter(category => category.isActive).map((category) => (
             <Button
               key={category.id}
               variant={selectedCategory === category.id ? 'default' : 'outline'}

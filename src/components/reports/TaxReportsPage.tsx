@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FileText, Download, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useBusinessStore } from '@/stores/useBusinessStore';
+import { useSettingsStore } from '@/stores/useSettingsStore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
@@ -19,6 +20,7 @@ interface ExportResult {
 export function TaxReportsPage() {
   const { transactions, getTransactionsByDateRange } = useTransactionStore();
   const { businessInfo, softwareInfo, taxReportConfig } = useBusinessStore();
+  const { globalTaxRate } = useSettingsStore();
   
   const [exportMode, setExportMode] = useState<'date-range' | 'year'>('date-range');
   const [startDate, setStartDate] = useState('');
@@ -136,6 +138,8 @@ export function TaxReportsPage() {
     try {
       // This will be implemented in Electron IPC
       if (window.electronAPI?.generateTaxReport) {
+        // Convert globalTaxRate from decimal to percentage (e.g., 0.08 -> 8)
+        const taxRatePercent = globalTaxRate ? globalTaxRate * 100 : 8;
         const result = await window.electronAPI.generateTaxReport({
           transactions: filteredTransactions,
           businessInfo,
@@ -144,6 +148,7 @@ export function TaxReportsPage() {
           dateRange,
           drive: exportPath,
           useCustomPath: useCustomPath,
+          globalTaxRate: taxRatePercent, // Pass as percentage
         });
 
         setExportResult({

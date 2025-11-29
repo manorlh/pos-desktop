@@ -24,100 +24,87 @@ export function VirtualKeyboard({
   const [isShift, setIsShift] = useState(false);
   const [language, setLanguage] = useState<Language>('hebrew'); // Default to Hebrew
   const keyboardRef = useRef<HTMLDivElement>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(400);
 
   useEffect(() => {
     // Sync with current value when keyboard opens or value changes
     setInput(currentValue);
   }, [currentValue, isOpen]);
 
-  // Sync with physical keyboard input in real-time and ensure input stays focused
+  // Measure and update keyboard height after render
+  useEffect(() => {
+    if (isOpen && keyboardRef.current) {
+      // Use requestAnimationFrame to ensure DOM is fully rendered
+      const measureHeight = () => {
+        if (keyboardRef.current) {
+          const height = keyboardRef.current.offsetHeight;
+          setKeyboardHeight(height);
+          document.documentElement.style.setProperty('--keyboard-height', `${height}px`);
+        }
+      };
+      
+      // Measure after a short delay to ensure layout is complete
+      requestAnimationFrame(() => {
+        requestAnimationFrame(measureHeight);
+      });
+      
+      // Also measure on window resize for responsive behavior
+      const handleResize = () => {
+        measureHeight();
+      };
+      window.addEventListener('resize', handleResize);
+      
+      return () => {
+        window.removeEventListener('resize', handleResize);
+      };
+    } else {
+      document.documentElement.style.setProperty('--keyboard-height', '0px');
+    }
+  }, [isOpen]);
+
+  // Sync with physical keyboard input in real-time
   useEffect(() => {
     if (isOpen) {
-      // Find the focused input and keep it focused
-      const activeElement = document.activeElement as HTMLInputElement;
-      if (activeElement && activeElement.tagName === 'INPUT' && activeElement.type !== 'file') {
-        // Keep the input focused so physical keyboard works
-        const keepFocused = () => {
-          if (document.activeElement !== activeElement && activeElement.isConnected) {
-            // Use setTimeout to ensure focus happens after any other focus changes
-            setTimeout(() => {
-              if (document.activeElement !== activeElement && activeElement.isConnected) {
-                activeElement.focus();
-              }
-            }, 0);
-          }
-        };
-        
-        // Sync value from physical keyboard in real-time
-        const syncInterval = setInterval(() => {
+      // Sync value from physical keyboard in real-time
+      // Track the currently focused input dynamically
+      const syncInterval = setInterval(() => {
+        const activeElement = document.activeElement as HTMLInputElement;
+        if (activeElement && activeElement.tagName === 'INPUT' && activeElement.type !== 'file') {
+          // Sync value if it changed
           if (activeElement.value !== input) {
             setInput(activeElement.value);
             onInput(activeElement.value);
           }
-          // Continuously ensure input stays focused
-          keepFocused();
-        }, 50); // Check more frequently
-        
-        // Listen to input events directly for immediate sync
-        const handleInput = () => {
-          if (activeElement.value !== input) {
-            setInput(activeElement.value);
-            onInput(activeElement.value);
+        }
+      }, 100);
+      
+      // Listen to input events on all inputs for immediate sync
+      const handleInput = (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        if (target && target.tagName === 'INPUT' && target.type !== 'file' && target === document.activeElement) {
+          if (target.value !== input) {
+            setInput(target.value);
+            onInput(target.value);
           }
-        };
-        
-        // Listen to keyboard events to keep focus
-        const handleKeyDown = () => {
-          keepFocused();
-        };
-        
-        const handleKeyUp = () => {
-          keepFocused();
-        };
-        
-        // Add event listeners
-        activeElement.addEventListener('input', handleInput, true);
-        activeElement.addEventListener('keydown', handleKeyDown, true);
-        activeElement.addEventListener('keyup', handleKeyUp, true);
-        activeElement.addEventListener('focus', keepFocused, true);
-        activeElement.addEventListener('blur', keepFocused, true);
-        
-        // Ensure input is focused immediately and stays focused
-        activeElement.focus();
-        setTimeout(() => {
-          activeElement.focus();
-        }, 0);
-        setTimeout(() => {
-          activeElement.focus();
-        }, 100);
-        
-        return () => {
-          clearInterval(syncInterval);
-          activeElement.removeEventListener('input', handleInput, true);
-          activeElement.removeEventListener('keydown', handleKeyDown, true);
-          activeElement.removeEventListener('keyup', handleKeyUp, true);
-          activeElement.removeEventListener('focus', keepFocused, true);
-          activeElement.removeEventListener('blur', keepFocused, true);
-        };
-      }
+        }
+      };
+      
+      // Add event listener to document to catch all input events
+      document.addEventListener('input', handleInput, true);
+      
+      return () => {
+        clearInterval(syncInterval);
+        document.removeEventListener('input', handleInput, true);
+      };
     }
   }, [isOpen, input, onInput]);
 
   useEffect(() => {
     if (isOpen) {
-      // Don't steal focus from the actual input field
-      // Keep the input field focused so physical keyboard works
       // Reset to Hebrew default when keyboard first opens
       if (inputType === 'text') {
         setLanguage('hebrew');
         setIsShift(false);
-      }
-      
-      // Ensure the actual input field stays focused
-      const activeElement = document.activeElement as HTMLInputElement;
-      if (activeElement && activeElement.tagName === 'INPUT') {
-        // Keep the input focused - don't move focus to keyboard
-        activeElement.focus();
       }
     }
   }, [isOpen, inputType]);
@@ -200,41 +187,40 @@ export function VirtualKeyboard({
 
   const layout = inputType === 'number' || inputType === 'numeric' ? numericLayout : textLayout;
 
-  if (!isOpen) return null;
-
   return (
-    <>
-      {/* Overlay background - only handles mouse/touch, not keyboard */}
-      <div 
-        className="fixed inset-0 z-40 bg-black/50" 
-        onClick={onClose}
-        onMouseDown={(e) => {
-          // Allow clicks to close, but don't interfere with keyboard
-          if (e.target === e.currentTarget) {
-            onClose();
-          }
-        }}
-        // No keyboard event handlers - keyboard events pass through to input
-      />
-      {/* Keyboard panel - positioned above overlay */}
-      <div 
-        className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t border-border rounded-t-lg shadow-lg w-full max-w-4xl max-h-[70vh] overflow-auto touch-manipulation mx-auto"
-        onClick={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        ref={keyboardRef}
-        tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}
-        // No keyboard event handlers - let physical keyboard work on input
-      >
+    <div 
+      data-virtual-keyboard
+      className="fixed bottom-0 left-0 right-0 z-[102] bg-background border-t border-border shadow-2xl w-full max-w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-5xl max-h-[560px] overflow-auto touch-manipulation mx-auto transition-transform duration-300 ease-out"
+      style={{
+        transform: isOpen ? 'translateY(0)' : 'translateY(100%)',
+        visibility: isOpen ? 'visible' : 'hidden',
+        paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + 1.5rem)`,
+        pointerEvents: isOpen ? 'auto' : 'none',
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+      }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+      }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+      }}
+      ref={keyboardRef}
+      tabIndex={-1}
+    >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border gap-2">
-          <div className="flex-1">
+        <div className="flex items-center justify-between p-2 sm:p-3 md:p-4 border-b border-border gap-2">
+          <div className="flex-1 min-w-0">
             <input
               type="text"
               value={input}
               readOnly
               className={cn(
-                "w-full px-4 py-2 text-lg border border-input rounded-md bg-background",
+                "w-full px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 text-sm sm:text-base md:text-lg border border-input rounded-md bg-background",
                 language === 'hebrew' ? 'text-right' : 'text-left'
               )}
               placeholder={language === 'hebrew' ? 'הקלד כאן...' : 'Type here...'}
@@ -249,31 +235,32 @@ export function VirtualKeyboard({
           {inputType === 'text' && (
             <Button
               variant={language === 'hebrew' ? 'default' : 'outline'}
-              size="lg"
+              size="sm"
+              className="sm:size-lg touch-manipulation min-w-[80px] sm:min-w-[100px] md:min-w-[120px] text-xs sm:text-sm md:text-base px-2 sm:px-3 md:px-4"
               onClick={() => {
                 setLanguage(language === 'hebrew' ? 'english' : 'hebrew');
                 setIsShift(false); // Reset shift when switching languages
               }}
-              className="min-w-[120px] touch-manipulation"
             >
-              <Languages className="h-4 w-4 mr-2" />
-              {language === 'hebrew' ? 'עברית' : 'English'}
+              <Languages className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">{language === 'hebrew' ? 'עברית' : 'English'}</span>
+              <span className="sm:hidden">{language === 'hebrew' ? 'עב' : 'EN'}</span>
             </Button>
           )}
           <Button
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="touch-manipulation"
+            className="touch-manipulation h-8 w-8 sm:h-10 sm:w-10"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
         </div>
 
         {/* Keyboard */}
-        <div className="p-4">
+        <div className="p-2 sm:p-3 md:p-4 pb-4 sm:pb-5 md:pb-6">
           {layout.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-2 mb-2 justify-center">
+            <div key={rowIndex} className="flex gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2 justify-center flex-wrap">
               {row.map((key) => {
                 const isSpecial = ['Backspace', 'Enter', 'Shift', 'Space', 'Clear'].includes(key);
                 const isWide = key === 'Space' || key === 'Enter' || key === 'Backspace';
@@ -282,12 +269,16 @@ export function VirtualKeyboard({
                   <Button
                     key={key}
                     variant={isShift && key === 'Shift' ? 'default' : 'outline'}
-                    size="lg"
                     className={cn(
-                      'min-w-[60px] h-16 text-lg font-semibold touch-manipulation',
-                      isWide && 'flex-1 max-w-[200px]',
-                      isSpecial && 'bg-muted hover:bg-muted/80',
-                      'active:scale-95 transition-transform'
+                      'touch-manipulation active:scale-95 transition-transform font-semibold',
+                      // Responsive sizing
+                      'min-w-[40px] sm:min-w-[50px] md:min-w-[60px] lg:min-w-[70px]',
+                      'h-10 sm:h-12 md:h-14 lg:h-16',
+                      'text-xs sm:text-sm md:text-base lg:text-lg',
+                      'px-1 sm:px-2 md:px-3',
+                      // Wide buttons
+                      isWide && 'flex-1 max-w-[120px] sm:max-w-[150px] md:max-w-[180px] lg:max-w-[200px]',
+                      isSpecial && 'bg-muted hover:bg-muted/80'
                     )}
                     onClick={() => handleKeyPress(key)}
                     onTouchStart={(e) => {
@@ -301,7 +292,12 @@ export function VirtualKeyboard({
                     {key === 'Backspace' ? '⌫' : 
                      key === 'Enter' ? '✓' :
                      key === 'Shift' ? '⇧' :
-                     key === 'Space' ? 'Space' :
+                     key === 'Space' ? (
+                       <>
+                         <span className="hidden sm:inline">Space</span>
+                         <span className="sm:hidden">␣</span>
+                       </>
+                     ) :
                      key === 'Clear' ? 'Clear' :
                      key}
                   </Button>
@@ -311,11 +307,10 @@ export function VirtualKeyboard({
           ))}
           
           {/* Action buttons */}
-          <div className="flex gap-2 mt-4" dir={language === 'hebrew' ? 'rtl' : 'ltr'}>
+          <div className="flex gap-2 sm:gap-3 mt-2 sm:mt-3 md:mt-4 mb-0" dir={language === 'hebrew' ? 'rtl' : 'ltr'}>
             <Button
               variant="outline"
-              size="lg"
-              className="flex-1 h-16 text-lg font-semibold touch-manipulation"
+              className="flex-1 touch-manipulation h-10 sm:h-12 md:h-14 lg:h-16 text-xs sm:text-sm md:text-base lg:text-lg font-semibold"
               onClick={() => {
                 setInput('');
                 onInput('');
@@ -325,8 +320,7 @@ export function VirtualKeyboard({
             </Button>
             <Button
               variant="default"
-              size="lg"
-              className="flex-1 h-16 text-lg font-semibold touch-manipulation"
+              className="flex-1 touch-manipulation h-10 sm:h-12 md:h-14 lg:h-16 text-xs sm:text-sm md:text-base lg:text-lg font-semibold"
               onClick={() => {
                 onInput(input);
                 onClose();
@@ -336,8 +330,7 @@ export function VirtualKeyboard({
             </Button>
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 

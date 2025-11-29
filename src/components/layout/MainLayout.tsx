@@ -6,10 +6,14 @@ import { TransactionHistory } from '../transactions/TransactionHistory';
 import { PrinterTest } from '../test/PrinterTest';
 import { TaxReportsPage } from '../reports/TaxReportsPage';
 import { SettingsPage } from '../settings/SettingsPage';
+import { ProductsPage } from '../products/ProductsPage';
+import { CategoriesPage } from '../categories/CategoriesPage';
+import { useVirtualKeyboard } from '@/contexts/VirtualKeyboardContext';
 import type { ViewType } from '@/types/layout';
 
 export function MainLayout() {
   const [currentView, setCurrentView] = useState<ViewType>('pos');
+  const { isOpen: isKeyboardOpen } = useVirtualKeyboard();
 
   const renderView = () => {
     switch (currentView) {
@@ -18,7 +22,9 @@ export function MainLayout() {
       case 'transactions':
         return <TransactionHistory />;
       case 'products':
-        return <div className="p-6">Products Management (Coming Soon)</div>;
+        return <ProductsPage />;
+      case 'categories':
+        return <CategoriesPage />;
       case 'reports':
         return <TaxReportsPage />;
       case 'test':
@@ -31,11 +37,17 @@ export function MainLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-background overflow-hidden">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
-      <div className="flex-1 flex flex-col">
+      <div 
+        className="flex-1 flex flex-col overflow-hidden" 
+        style={{
+          paddingBottom: isKeyboardOpen ? 'var(--keyboard-height, 400px)' : '0px',
+          transition: 'padding-bottom 0.3s ease-out',
+        }}
+      >
         <Header />
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-auto">
           {renderView()}
         </main>
       </div>

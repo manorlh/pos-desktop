@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Cart, CartItem, Product } from '../types/index';
 import { generateUUID } from '../utils/uuid';
+import { useSettingsStore } from './useSettingsStore';
 
 interface CartStore {
   cart: Cart;
@@ -11,8 +12,6 @@ interface CartStore {
   clearCart: () => void;
   calculateTotals: () => void;
 }
-
-const TAX_RATE = 0.08; // 8% tax rate
 
 const createEmptyCart = (): Cart => ({
   id: generateUUID(),
@@ -150,26 +149,37 @@ export const useCartStore = create<CartStore>((set, get) => ({
 
   calculateTotals: () => {
     const { cart } = get();
+    const taxRate = useSettingsStore.getState().globalTaxRate || 0.08; // Default to 8% if not loaded
     
-    let subtotal = 0;
+    // All product prices are tax-inclusive
+    // We need to extract the tax amount from the prices
+    let totalWithTax = 0;
     let totalDiscount = 0;
 
     cart.items.forEach(item => {
-      const itemTotal = item.quantity * item.unitPrice;
-      subtotal += itemTotal;
+      // item.unitPrice is tax-inclusive
+      const itemTotalWithTax = item.quantity * item.unitPrice;
+      totalWithTax += itemTotalWithTax;
 
       if (item.discount && item.discountType) {
         if (item.discountType === 'percentage') {
-          totalDiscount += itemTotal * (item.discount / 100);
+          totalDiscount += itemTotalWithTax * (item.discount / 100);
         } else {
           totalDiscount += item.discount;
         }
       }
     });
 
-    const discountedSubtotal = subtotal - totalDiscount;
-    const taxAmount = discountedSubtotal * TAX_RATE;
-    const totalAmount = discountedSubtotal + taxAmount;
+    // Apply discounts to tax-inclusive total
+    const discountedTotalWithTax = totalWithTax - totalDiscount;
+    
+    // Extract tax from tax-inclusive price
+    // If price includes tax: price = subtotal * (1 + taxRate)
+    // So: subtotal = price / (1 + taxRate)
+    // And: taxAmount = price - subtotal = price - (price / (1 + taxRate))
+    const subtotal = discountedTotalWithTax / (1 + taxRate);
+    const taxAmount = discountedTotalWithTax - subtotal;
+    const totalAmount = discountedTotalWithTax; // Total is already tax-inclusive
 
     set({
       cart: {

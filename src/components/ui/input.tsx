@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import { useVirtualKeyboard } from "@/contexts/VirtualKeyboardContext"
+import { useSettingsStore } from "@/stores/useSettingsStore"
 
 export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -9,24 +10,46 @@ export interface InputProps
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, type, showVirtualKeyboard = true, onFocus, value, onChange, ...props }, ref) => {
-    const { openKeyboard } = useVirtualKeyboard();
+    const { openKeyboard, isOpen: isKeyboardOpen } = useVirtualKeyboard();
+    const { virtualKeyboardEnabled } = useSettingsStore();
     
     const inputRef = React.useRef<HTMLInputElement>(null);
 
     React.useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
 
+    // Scroll input into view when keyboard opens
+    React.useEffect(() => {
+      if (isKeyboardOpen && inputRef.current === document.activeElement) {
+        // Wait for keyboard animation to complete, then scroll
+        // Use a longer delay to ensure keyboard is fully open and dialog has repositioned
+        const timeoutId = setTimeout(() => {
+          if (inputRef.current === document.activeElement) {
+            inputRef.current?.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center',
+              inline: 'nearest'
+            });
+          }
+        }, 350); // Wait for keyboard animation (300ms) + small buffer
+        
+        return () => clearTimeout(timeoutId);
+      }
+    }, [isKeyboardOpen]);
+
     const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
       // Allow physical keyboard to work - don't prevent default focus
       // Only show virtual keyboard for text inputs, not for file inputs, etc.
+      // Virtual keyboard works everywhere, including dialogs
+      // Check if virtual keyboard is enabled in settings
       if (
         showVirtualKeyboard && 
+        virtualKeyboardEnabled &&
         type !== 'file' && 
         type !== 'checkbox' && 
         type !== 'radio' &&
         type !== 'hidden'
       ) {
-        // Show virtual keyboard as an overlay option (doesn't block physical keyboard)
-        // Don't prevent default - let the input receive focus normally so physical keyboard works
+        // Show virtual keyboard - it will push content up like mobile
         const inputType = type === 'number' ? 'numeric' : 'text';
         openKeyboard(
           (newValue) => {
@@ -77,9 +100,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         value={value}
         style={{ 
           ...props.style,
-          // Ensure input is always accessible for keyboard events
-          zIndex: showVirtualKeyboard ? 60 : undefined,
-          position: showVirtualKeyboard ? 'relative' : undefined,
+          // Don't set z-index on inputs - let them use natural stacking order
+          // Only dialogs and virtual keyboard need explicit z-index
         }}
         {...props}
       />

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Product, Category } from '../types/index';
+import { useSettingsStore } from './useSettingsStore';
 // Database operations will be added via IPC later
 // import { 
 //   getDatabase,
@@ -58,13 +59,31 @@ export const useProductStore = create<ProductStore>((set, get) => ({
   },
 
   filterProducts: () => {
-    const { products, selectedCategory, searchQuery } = get();
+    const { products, selectedCategory, searchQuery, categories } = get();
+    
+    // Get the setting from useSettingsStore
+    const hideOutOfStock = useSettingsStore.getState().hideOutOfStockProducts;
+    
+    // Get active category IDs
+    const activeCategoryIds = new Set(
+      categories.filter(cat => cat.isActive).map(cat => cat.id)
+    );
+    
+    // Clear selected category if it's inactive
+    let currentSelectedCategory = selectedCategory;
+    if (selectedCategory && !activeCategoryIds.has(selectedCategory)) {
+      currentSelectedCategory = null;
+      set({ selectedCategory: null });
+    }
     
     let filtered = [...products];
 
+    // Filter out products from inactive categories
+    filtered = filtered.filter(product => activeCategoryIds.has(product.categoryId));
+
     // Filter by category
-    if (selectedCategory) {
-      filtered = filtered.filter(product => product.categoryId === selectedCategory);
+    if (currentSelectedCategory) {
+      filtered = filtered.filter(product => product.categoryId === currentSelectedCategory);
     }
 
     // Filter by search query
@@ -78,8 +97,10 @@ export const useProductStore = create<ProductStore>((set, get) => ({
       );
     }
 
-    // Only show in-stock products
-    filtered = filtered.filter(product => product.inStock && product.stockQuantity > 0);
+    // Filter out-of-stock products only if setting is enabled
+    if (hideOutOfStock) {
+      filtered = filtered.filter(product => product.inStock && product.stockQuantity > 0);
+    }
 
     set({ filteredProducts: filtered });
   },
