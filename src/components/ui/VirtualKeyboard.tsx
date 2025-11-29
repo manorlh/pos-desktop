@@ -109,6 +109,46 @@ export function VirtualKeyboard({
     }
   }, [isOpen, inputType]);
 
+  // Close keyboard when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement;
+      
+      // Don't close if clicking on the keyboard itself
+      if (keyboardRef.current && keyboardRef.current.contains(target)) {
+        return;
+      }
+
+      // Don't close if clicking on an input (input focus should keep keyboard open)
+      if (target.tagName === 'INPUT' && target.type !== 'file') {
+        return;
+      }
+
+      // Don't close if clicking on a dialog or select dropdown
+      if (
+        target.closest('[role="dialog"]') ||
+        target.closest('[data-radix-select-content]') ||
+        target.closest('[data-radix-popper-content-wrapper]')
+      ) {
+        return;
+      }
+
+      // Close the keyboard when clicking outside
+      onClose();
+    };
+
+    // Use capture phase to catch events before they bubble
+    document.addEventListener('mousedown', handleClickOutside, true);
+    document.addEventListener('touchstart', handleClickOutside, true);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+      document.removeEventListener('touchstart', handleClickOutside, true);
+    };
+  }, [isOpen, onClose]);
+
   const handleKeyPress = (key: string) => {
     let newInput = input;
 

@@ -14,7 +14,7 @@
     "electron:build": "npm run build && electron-builder --win",
     "dist": "npm run build && electron-builder --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",
-    "postinstall": "cd node_modules/better-sqlite3 && rm -rf build && export npm_config_target=13.6.9 && export npm_config_runtime=electron && export npm_config_disturl=https://electronjs.org/headers && npx node-gyp rebuild --target=13.6.9 --arch=$(uname -m | sed 's/x86_64/x64/;s/arm64/arm64/') --dist-url=https://electronjs.org/headers"
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",
@@ -73,8 +73,17 @@
       "dist-electron/**/*",
       "node_modules/**/*"
     ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ],
+    "beforePack": "./scripts/before-pack.js",
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
     "mac": {
       "icon": "assets/icon.icns",
+      "identity": null,
+      "gatekeeperAssess": false,
+      "hardenedRuntime": false,
       "target": [
         {
           "target": "dmg",
