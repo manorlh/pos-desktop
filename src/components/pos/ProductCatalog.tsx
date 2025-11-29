@@ -88,30 +88,30 @@ export function ProductCatalog() {
       {/* Products Grid/List */}
       <div className="flex-1 overflow-auto">
         {viewMode === 'grid' ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
             {filteredProducts.map((product) => (
               <Card 
                 key={product.id} 
                 className="cursor-pointer hover:shadow-md transition-shadow"
                 onClick={() => handleAddToCart(product.id)}
               >
-                <CardContent className="p-4">
-                  <div className="aspect-square bg-muted rounded-lg mb-3 flex items-center justify-center">
-                    <span className="text-2xl">📦</span>
+                <CardContent className="p-2 sm:p-3 md:p-4">
+                  <div className="aspect-square bg-muted rounded-lg mb-2 sm:mb-3 flex items-center justify-center">
+                    <span className="text-xl sm:text-2xl">📦</span>
                   </div>
-                  <h3 className="font-medium text-sm mb-1 line-clamp-2">{product.name}</h3>
-                  <p className="text-xs text-muted-foreground mb-2 line-clamp-1">
+                  <h3 className="font-medium text-xs sm:text-sm mb-1 line-clamp-2">{product.name}</h3>
+                  <p className="text-xs text-muted-foreground mb-1 sm:mb-2 line-clamp-1 hidden sm:block">
                     {product.description}
                   </p>
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-primary">
+                    <span className="font-bold text-primary text-xs sm:text-sm">
                       {formatCurrency(product.price)}
                     </span>
                     <Badge variant="secondary" className="text-xs">
                       {product.stockQuantity}
                     </Badge>
                   </div>
-                  <div className="mt-2">
+                  <div className="mt-1 sm:mt-2">
                     <Badge variant="outline" className="text-xs">
                       {categories.find(c => c.id === product.categoryId)?.name}
                     </Badge>

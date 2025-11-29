@@ -6,7 +6,8 @@ import {
   Settings, 
   Store,
   TestTube,
-  FileText
+  FileText,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -15,6 +16,8 @@ import type { ViewType } from '@/types/layout';
 interface SidebarProps {
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const navigation = [
@@ -27,20 +30,40 @@ const navigation = [
   { id: 'settings' as ViewType, name: 'Settings', icon: Settings },
 ];
 
-export function Sidebar({ currentView, onViewChange }: SidebarProps) {
+export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: SidebarProps) {
   return (
-    <div className="w-64 bg-card border-r border-border flex flex-col">
+    <aside
+      className={cn(
+        "fixed lg:static inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transform transition-transform duration-300 ease-in-out",
+        "w-64",
+        // On mobile/tablet: slide in/out, on desktop: always visible
+        isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+      )}
+    >
       <div className="p-6 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Store className="h-8 w-8 text-primary" />
-          <div>
-            <h1 className="text-xl font-bold">POS Desktop</h1>
-            <p className="text-sm text-muted-foreground">Point of Sale System</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Store className="h-8 w-8 text-primary" />
+            <div>
+              <h1 className="text-xl font-bold">POS Desktop</h1>
+              <p className="text-sm text-muted-foreground">Point of Sale System</p>
+            </div>
           </div>
+          {/* Close button for mobile/tablet */}
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={onClose}
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          )}
         </div>
       </div>
       
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 p-4 overflow-y-auto">
         <div className="space-y-2">
           {navigation.map((item) => (
             <Button
@@ -53,7 +76,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               onClick={() => onViewChange(item.id)}
             >
               <item.icon className="mr-2 h-4 w-4" />
-              {item.name}
+              <span className="lg:inline">{item.name}</span>
             </Button>
           ))}
         </div>
@@ -65,6 +88,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
           <p>Store #001</p>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

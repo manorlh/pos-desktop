@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, Plus, Minus, CreditCard } from 'lucide-react';
+import { Trash2, Plus, Minus, CreditCard, X } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -7,7 +7,11 @@ import { Badge } from '../ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { CheckoutDialog } from './CheckoutDialog';
 
-export function Cart() {
+interface CartProps {
+  onClose?: () => void;
+}
+
+export function Cart({ onClose }: CartProps) {
   const [showCheckout, setShowCheckout] = useState(false);
   const { cart, removeItem, updateItemQuantity, clearCart } = useCartStore();
 
@@ -26,15 +30,28 @@ export function Cart() {
       <CardHeader className="border-b border-border">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">Current Sale</CardTitle>
-          {cart.items.length > 0 && (
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={clearCart}
-            >
-              Clear All
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {cart.items.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={clearCart}
+                className="hidden sm:inline-flex"
+              >
+                Clear All
+              </Button>
+            )}
+            {onClose && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                onClick={onClose}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
 

@@ -13,6 +13,7 @@ import type { ViewType } from '@/types/layout';
 
 export function MainLayout() {
   const [currentView, setCurrentView] = useState<ViewType>('pos');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const { isOpen: isKeyboardOpen } = useVirtualKeyboard();
 
   const renderView = () => {
@@ -36,9 +37,31 @@ export function MainLayout() {
     }
   };
 
+  const handleViewChange = (view: ViewType) => {
+    setCurrentView(view);
+    // Close sidebar on mobile/tablet after selecting a view
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      {/* Overlay for mobile/tablet */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      
+      <Sidebar 
+        currentView={currentView} 
+        onViewChange={handleViewChange}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      
       <div 
         className="flex-1 flex flex-col overflow-hidden" 
         style={{
@@ -46,7 +69,7 @@ export function MainLayout() {
           transition: 'padding-bottom 0.3s ease-out',
         }}
       >
-        <Header />
+        <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1 overflow-auto">
           {renderView()}
         </main>
