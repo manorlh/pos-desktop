@@ -5,7 +5,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "electron": "wait-on tcp:5173 && cross-env IS_DEV=true electron .",
@@ -14,7 +14,8 @@
     "electron:build": "npm run build && electron-builder --win",
     "dist": "npm run build && electron-builder --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",
-    "postinstall": "electron-builder install-app-deps"
+    "build:windows": "echo '⚠️  Windows builds must be done on Windows or via GitHub Actions. Push to GitHub and use the Actions tab to build, or run this on a Windows machine: npm run electron:build'",
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",
@@ -71,7 +72,16 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/**/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!node_modules/**/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/*.map",
+      "!node_modules/**/.{bin,git,hg,svn}",
+      "!node_modules/**/{.nyc_output,coverage,coverage-lcov,coverage-final.json}",
+      "!node_modules/**/.{eslintrc,prettierrc,prettierignore,eslintignore}",
+      "!node_modules/**/.{travis.yml,appveyor.yml,circleci}",
+      "!node_modules/**/.{npmignore,yarn-integrity,yarn-error.log}"
     ],
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**/*"
@@ -102,6 +112,15 @@
           "arch": [
             "x64"
           ]
+        }
+      ],
+      "npmRebuild": true,
+      "nodeGypRebuild": true,
+      "extraResources": [
+        {
+          "from": "node_modules/better-sqlite3",
+          "to": "better-sqlite3",
+          "filter": ["**/*"]
         }
       ]
     },

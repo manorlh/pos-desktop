@@ -4,16 +4,76 @@ const fs = require('fs');
 const archiver = require('archiver');
 const iconv = require('iconv-lite');
 
-const __dirname = path.dirname(__filename);
+const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
 // In development, __dirname is dist-electron, so we go up one level to project root
-const projectRoot = app.isPackaged 
-  ? process.resourcesPath
-  : path.resolve(__dirname, '..');
-// Use absolute path to better-sqlite3 package directory
-// Node.js will resolve to lib/index.js via package.json main field
-const betterSqlite3Path = path.join(projectRoot, 'node_modules', 'better-sqlite3');
-const Database = require(betterSqlite3Path);
+let betterSqlite3Path: string;
+if (app.isPackaged) {
+  // When packaged, better-sqlite3 is unpacked from ASAR
+  // On Windows: resources/app.asar.unpacked/node_modules/better-sqlite3
+  // On macOS: resources/app.asar.unpacked/node_modules/better-sqlite3
+  // process.resourcesPath points to the resources folder which contains app.asar and app.asar.unpacked
+  const resourcesPath = (process as any).resourcesPath || app.getAppPath().replace(/[\\/]app\.asar$/, '');
+  betterSqlite3Path = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'better-sqlite3');
+} else {
+  // In development, better-sqlite3 is in the project root node_modules
+  const projectRoot = path.resolve(mainDirname, '..');
+  betterSqlite3Path = path.join(projectRoot, 'node_modules', 'better-sqlite3');
+}
+
+// Try to require better-sqlite3 with better error handling
+let Database: any;
+try {
+  Database = require(betterSqlite3Path);
+  console.log('Successfully loaded better-sqlite3 from:', betterSqlite3Path);
+} catch (error: any) {
+  console.error('Failed to load better-sqlite3:', error);
+  console.error('Looking for better-sqlite3 at:', betterSqlite3Path);
+  console.error('app.isPackaged:', app.isPackaged);
+  console.error('process.platform:', process.platform);
+  
+  if (app.isPackaged) {
+    const resourcesPath = (process as any).resourcesPath || app.getAppPath().replace(/[\\/]app\.asar$/, '');
+    console.error('process.resourcesPath:', resourcesPath);
+    console.error('app.getAppPath():', app.getAppPath());
+    console.error('__dirname:', mainDirname);
+    
+    // Try multiple alternative paths
+    const altPaths = [
+      path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'better-sqlite3'),
+      path.join(resourcesPath, 'node_modules', 'better-sqlite3'),
+      path.join(path.dirname(resourcesPath), 'app.asar.unpacked', 'node_modules', 'better-sqlite3'),
+      path.join(path.dirname(app.getAppPath()), 'app.asar.unpacked', 'node_modules', 'better-sqlite3'),
+    ];
+    
+    console.error('Trying alternative paths:', altPaths);
+    let found = false;
+    for (const altPath of altPaths) {
+      try {
+        if (fs.existsSync(altPath)) {
+          console.log('Found better-sqlite3 at:', altPath);
+          Database = require(altPath);
+          console.log('Successfully loaded better-sqlite3 from:', altPath);
+          found = true;
+          break;
+        } else {
+          console.log('Path does not exist:', altPath);
+        }
+      } catch (altError: any) {
+        console.error('Failed to load from', altPath, ':', altError.message);
+        // Continue to next path
+      }
+    }
+    
+    if (!found) {
+      const errorMsg = `Cannot find module 'better-sqlite3'. Tried paths:\n${[betterSqlite3Path, ...altPaths].join('\n')}\n\nPlease ensure better-sqlite3 is properly packaged in app.asar.unpacked.`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+  } else {
+    throw new Error(`Cannot find module 'better-sqlite3' at ${betterSqlite3Path}. Please run 'npm install'.`);
+  }
+}
 
 // ============================================================================
 // Database initialization and operations (inlined from database-main.ts and database-ops.ts)
