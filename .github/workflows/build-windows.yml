@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
+      - name: Install app dependencies for Electron
+        run: npm run postinstall:windows
+      
       - name: Build application and Windows installer
         run: npm run electron:build
         env:

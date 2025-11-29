@@ -15,7 +15,8 @@
     "dist": "npm run build && electron-builder --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",
     "build:windows": "echo '⚠️  Windows builds must be done on Windows or via GitHub Actions. Push to GitHub and use the Actions tab to build, or run this on a Windows machine: npm run electron:build'",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "postinstall:windows": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",
@@ -87,8 +88,6 @@
       "**/node_modules/better-sqlite3/**/*"
     ],
     "beforePack": "./scripts/before-pack.js",
-    "npmRebuild": false,
-    "nodeGypRebuild": false,
     "mac": {
       "icon": "assets/icon.icns",
       "identity": null,
@@ -114,8 +113,6 @@
           ]
         }
       ],
-      "npmRebuild": true,
-      "nodeGypRebuild": true,
       "extraResources": [
         {
           "from": "node_modules/better-sqlite3",
