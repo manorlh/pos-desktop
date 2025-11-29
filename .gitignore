@@ -6,11 +6,23 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Build outputs
 release/
-node_modules
-dist
-dist-ssr
+dist/
+dist-electron/
+dist-ssr/
 *.local
+
+# Dependencies
+node_modules/
+
+# Cache directories
+.cache/
+.electron-cache/
+.npm/
+.yarn/
+.pnpm-store/
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +34,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Electron specific
+out/
+app/
+*.asar
+*.asar.unpacked/
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment files
+.env
+.env.local
+.env.*.local
