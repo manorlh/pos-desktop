@@ -5,7 +5,6 @@ on:
   push:
     tags:
       - 'v*'  # Build on version tags
-  push:
     branches:
       - main
       - master
