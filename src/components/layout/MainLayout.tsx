@@ -39,34 +39,18 @@ export function MainLayout() {
 
   const handleViewChange = (view: ViewType) => {
     setCurrentView(view);
-    // Close sidebar on mobile/tablet after selecting a view
-    if (window.innerWidth < 1024) {
-      setSidebarOpen(false);
-    }
+    // Close sidebar after selecting a view
+    setSidebarOpen(false);
   };
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Overlay for mobile/tablet */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      
-      <Sidebar 
-        currentView={currentView} 
-        onViewChange={handleViewChange}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
-      
+    <div className="flex h-screen bg-background overflow-hidden relative">
       <div 
-        className="flex-1 flex flex-col overflow-hidden" 
+        className="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out" 
         style={{
+          marginRight: sidebarOpen ? '16rem' : '0',
           paddingBottom: isKeyboardOpen ? 'var(--keyboard-height, 400px)' : '0px',
-          transition: 'padding-bottom 0.3s ease-out',
+          transition: 'margin-right 0.3s ease-out, padding-bottom 0.3s ease-out',
         }}
       >
         <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
@@ -74,6 +58,13 @@ export function MainLayout() {
           {renderView()}
         </main>
       </div>
+      
+      <Sidebar 
+        currentView={currentView} 
+        onViewChange={handleViewChange}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
     </div>
   );
 }

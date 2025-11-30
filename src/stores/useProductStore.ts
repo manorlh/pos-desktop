@@ -64,22 +64,24 @@ export const useProductStore = create<ProductStore>((set, get) => ({
     // Get the setting from useSettingsStore
     const hideOutOfStock = useSettingsStore.getState().hideOutOfStockProducts;
     
-    // Get active category IDs
-    const activeCategoryIds = new Set(
-      categories.filter(cat => cat.isActive).map(cat => cat.id)
-    );
+    // Get active category IDs (only if categories are loaded)
+    const activeCategoryIds = categories.length > 0
+      ? new Set(categories.filter(cat => cat.isActive).map(cat => cat.id))
+      : null;
     
     // Clear selected category if it's inactive
     let currentSelectedCategory = selectedCategory;
-    if (selectedCategory && !activeCategoryIds.has(selectedCategory)) {
+    if (activeCategoryIds && selectedCategory && !activeCategoryIds.has(selectedCategory)) {
       currentSelectedCategory = null;
       set({ selectedCategory: null });
     }
     
     let filtered = [...products];
 
-    // Filter out products from inactive categories
-    filtered = filtered.filter(product => activeCategoryIds.has(product.categoryId));
+    // Filter out products from inactive categories (only if categories are loaded)
+    if (activeCategoryIds) {
+      filtered = filtered.filter(product => activeCategoryIds.has(product.categoryId));
+    }
 
     // Filter by category
     if (currentSelectedCategory) {
@@ -235,6 +237,8 @@ export const useProductStore = create<ProductStore>((set, get) => ({
           updatedAt: new Date(c.updatedAt),
         }));
         set({ categories: categoriesWithDates });
+        // Re-filter products after categories are loaded
+        get().filterProducts();
       }
     } catch (error) {
       console.error('Failed to load categories:', error);

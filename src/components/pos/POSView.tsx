@@ -27,7 +27,7 @@ export function POSView() {
   return (
     <div className="flex h-full relative">
       {/* Product Catalog - takes full width on mobile, flex-1 on larger screens */}
-      <div className="flex-1 p-3 sm:p-4 lg:p-6">
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 min-w-0">
         <ProductCatalog />
       </div>
       
@@ -42,11 +42,11 @@ export function POSView() {
       {/* Cart - responsive width and positioning */}
       <div 
         className={`
-          fixed lg:static inset-y-0 right-0 z-30
+          fixed lg:static inset-y-0 z-50
           w-full sm:w-80 lg:w-80 xl:w-96
           border-l border-border bg-card
           transform transition-transform duration-300 ease-in-out
-          ${cartOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
+          ${cartOpen ? 'translate-x-0 right-0' : 'translate-x-full right-0 lg:translate-x-0 lg:right-auto'}
         `}
         style={{ 
           top: '4rem', // Below header

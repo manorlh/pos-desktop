@@ -36,10 +36,10 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
   return (
     <aside
       className={cn(
-        "fixed lg:static inset-y-0 left-0 z-50 bg-card border-r border-border flex flex-col transform transition-transform duration-300 ease-in-out",
+        "fixed inset-y-0 right-0 z-40 bg-card border-l border-border flex flex-col transform transition-transform duration-300 ease-in-out",
         "w-64",
-        // On mobile/tablet: slide in/out, on desktop: always visible
-        isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        // Slide in from right when open, slide out to right when closed
+        isOpen ? "translate-x-0" : "translate-x-full"
       )}
     >
       <div className="p-6 border-b border-border">
@@ -51,12 +51,11 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
               <p className="text-sm text-muted-foreground">{t('pos.title')}</p>
             </div>
           </div>
-          {/* Close button for mobile/tablet */}
+          {/* Close button - always visible */}
           {onClose && (
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden"
               onClick={onClose}
             >
               <X className="h-5 w-5" />
@@ -78,7 +77,7 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
               onClick={() => onViewChange(item.id)}
             >
               <item.icon className="mr-2 h-4 w-4" />
-              <span className="lg:inline">{item.name}</span>
+              <span>{item.name}</span>
             </Button>
           ))}
         </div>

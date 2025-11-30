@@ -90,11 +90,16 @@ export function ProductCatalog() {
       {/* Products Grid/List */}
       <div className="flex-1 overflow-auto">
         {viewMode === 'grid' ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+          <div 
+            className="grid gap-2 sm:gap-3 md:gap-4"
+            style={{
+              gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))'
+            }}
+          >
             {filteredProducts.map((product) => (
               <Card 
                 key={product.id} 
-                className="cursor-pointer hover:shadow-md transition-shadow"
+                className="cursor-pointer hover:shadow-md transition-shadow min-w-[120px]"
                 onClick={() => handleAddToCart(product.id)}
               >
                 <CardContent className="p-2 sm:p-3 md:p-4">
