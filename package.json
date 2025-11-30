@@ -86,7 +86,8 @@
     ],
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**/*",
-      "**/node_modules/bindings/**/*"
+      "**/node_modules/bindings/**/*",
+      "**/node_modules/file-uri-to-path/**/*"
     ],
     "beforePack": "./scripts/before-pack.js",
     "mac": {
