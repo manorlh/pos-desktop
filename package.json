@@ -90,7 +90,6 @@
     ],
     "beforePack": "./scripts/before-pack.js",
     "mac": {
-      "icon": "assets/icon.icns",
       "identity": null,
       "gatekeeperAssess": false,
       "hardenedRuntime": false,
@@ -105,7 +104,6 @@
       ]
     },
     "win": {
-      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -133,12 +131,9 @@
       "allowElevation": true,
       "warningsAsErrors": false,
       "differentialPackage": false,
-      "perMachine": false,
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico"
+      "perMachine": false
     },
     "linux": {
-      "icon": "assets/icon.png",
       "target": [
         {
           "target": "AppImage",
