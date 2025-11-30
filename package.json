@@ -85,7 +85,8 @@
       "!node_modules/**/.{npmignore,yarn-integrity,yarn-error.log}"
     ],
     "asarUnpack": [
-      "**/node_modules/better-sqlite3/**/*"
+      "**/node_modules/better-sqlite3/**/*",
+      "**/node_modules/bindings/**/*"
     ],
     "beforePack": "./scripts/before-pack.js",
     "mac": {
@@ -120,6 +121,21 @@
           "filter": ["**/*"]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "POS Desktop",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "allowElevation": true,
+      "warningsAsErrors": false,
+      "differentialPackage": false,
+      "perMachine": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
     },
     "linux": {
       "icon": "assets/icon.png",

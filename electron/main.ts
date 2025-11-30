@@ -14,7 +14,24 @@ if (app.isPackaged) {
   // On macOS: resources/app.asar.unpacked/node_modules/better-sqlite3
   // process.resourcesPath points to the resources folder which contains app.asar and app.asar.unpacked
   const resourcesPath = (process as any).resourcesPath || app.getAppPath().replace(/[\\/]app\.asar$/, '');
-  betterSqlite3Path = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', 'better-sqlite3');
+  const unpackedPath = path.join(resourcesPath, 'app.asar.unpacked');
+  const nodeModulesPath = path.join(unpackedPath, 'node_modules');
+  betterSqlite3Path = path.join(nodeModulesPath, 'better-sqlite3');
+  
+  // Add unpacked node_modules to module search path so dependencies like 'bindings' can be found
+  const Module = require('module');
+  if (Module._nodeModulePaths) {
+    // Add unpacked node_modules to the module search paths
+    const originalNodeModulePaths = Module._nodeModulePaths;
+    Module._nodeModulePaths = function(from: string) {
+      const paths = originalNodeModulePaths.call(this, from);
+      // Insert unpacked node_modules at the beginning of the search path
+      if (fs.existsSync(nodeModulesPath)) {
+        paths.unshift(nodeModulesPath);
+      }
+      return paths;
+    };
+  }
 } else {
   // In development, better-sqlite3 is in the project root node_modules
   const projectRoot = path.resolve(mainDirname, '..');
