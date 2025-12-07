@@ -7,6 +7,7 @@ import { useTransactionStore } from './stores/useTransactionStore';
 import { useBusinessStore } from './stores/useBusinessStore';
 import { useDatabaseStore } from './stores/useDatabaseStore';
 import { useSettingsStore } from './stores/useSettingsStore';
+import { useTradingDayStore } from './stores/useTradingDayStore';
 import { mockProducts, mockCategories, mockUser } from './data/mockData';
 import './globals.css';
 
@@ -102,6 +103,10 @@ function App() {
       // Load today's transactions
       const { loadTodaysTransactions } = useTransactionStore.getState();
       await loadTodaysTransactions();
+      
+      // Load current trading day status
+      const { loadCurrentTradingDay } = useTradingDayStore.getState();
+      await loadCurrentTradingDay();
       
       // Load settings and set language
       const { loadSettings, language: settingsLanguage } = useSettingsStore.getState();

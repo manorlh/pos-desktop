@@ -3,6 +3,7 @@ import { DollarSign, Check, X, ArrowLeft, Delete } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useProductStore } from '@/stores/useProductStore';
+import { useTradingDayStore } from '@/stores/useTradingDayStore';
 import { 
   Dialog, 
   DialogContent, 
@@ -31,7 +32,9 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   const { cart, clearCart } = useCartStore();
   const { addTransaction } = useTransactionStore();
   const { loadProducts } = useProductStore();
+  const { isDayOpen } = useTradingDayStore();
   const { t, locale } = useI18n();
+  const [error, setError] = useState<string | null>(null);
 
   const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount);
   const canComplete = parseFloat(amountTendered || '0') >= cart.totalAmount;
@@ -78,7 +81,13 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   const handleCompleteTransaction = async () => {
     if (!canComplete) return;
 
+    if (!isDayOpen) {
+      setError(t('tradingDay.cannotProcessTransaction'));
+      return;
+    }
+
     setIsProcessing(true);
+    setError(null);
     
     try {
       const amountTenderedNum = parseFloat(amountTendered);
@@ -98,10 +107,12 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         clearCart();
         setIsComplete(false);
         setAmountTendered('');
+        setError(null);
         onOpenChange(false);
       }, 2000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Transaction failed:', error);
+      setError(error.message || t('tradingDay.cannotProcessTransaction'));
     } finally {
       setIsProcessing(false);
     }
@@ -111,6 +122,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     setAmountTendered('');
     setIsComplete(false);
     setIsProcessing(false);
+    setError(null);
   };
 
   const handleClose = (open: boolean) => {
@@ -319,6 +331,18 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                     )}
                     
                     {/* Insufficient Amount Warning */}
+                    {error && (
+                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
+                        {error}
+                      </div>
+                    )}
+                    
+                    {!isDayOpen && (
+                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
+                        {t('tradingDay.cannotProcessTransaction')}
+                      </div>
+                    )}
+
                     {parseFloat(amountTendered || '0') < cart.totalAmount && parseFloat(amountTendered || '0') > 0 && (
                       <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
                         {t('checkout.insufficientAmount')} {formatCurrency(cart.totalAmount - parseFloat(amountTendered || '0'), locale)} {t('checkout.more')}.

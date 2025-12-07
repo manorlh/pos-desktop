@@ -61,6 +61,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbGetSetting: (key: string) => ipcRenderer.invoke('db-get-setting', key),
   dbSaveSetting: (key: string, value: string) => ipcRenderer.invoke('db-save-setting', key, value),
   
+  // Trading day operations
+  dbGetCurrentTradingDay: () => ipcRenderer.invoke('db-get-current-trading-day'),
+  dbGetTradingDayByDate: (date: string) => ipcRenderer.invoke('db-get-trading-day-by-date', date),
+  dbGetTradingDaysByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-trading-days-by-date-range', startDate, endDate),
+  dbOpenTradingDay: (data: any) => ipcRenderer.invoke('db-open-trading-day', data),
+  dbCloseTradingDay: (id: string, data: any) => ipcRenderer.invoke('db-close-trading-day', id, data),
+  
   onMenuNewSale: (callback: () => void) => {
     ipcRenderer.on('menu-new-sale', callback);
   },

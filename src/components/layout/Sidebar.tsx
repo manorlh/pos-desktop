@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { 
   ShoppingCart, 
   Receipt, 
@@ -7,12 +8,19 @@ import {
   Store,
   TestTube,
   FileText,
+  Sun,
+  Moon,
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { useI18n } from '@/i18n';
+import { useTradingDayStore } from '@/stores/useTradingDayStore';
+import { OpenDayDialog } from '../trading-day/OpenDayDialog';
+import { CloseDayDialog } from '../trading-day/CloseDayDialog';
+import { ZReportDialog } from '../trading-day/ZReportDialog';
 import type { ViewType } from '@/types/layout';
+import type { TradingDay } from '@/types/index';
 
 interface SidebarProps {
   currentView: ViewType;
@@ -23,6 +31,11 @@ interface SidebarProps {
 
 export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: SidebarProps) {
   const { t } = useI18n();
+  const { isDayOpen } = useTradingDayStore();
+  const [openDayDialogOpen, setOpenDayDialogOpen] = useState(false);
+  const [closeDayDialogOpen, setCloseDayDialogOpen] = useState(false);
+  const [zReportDialogOpen, setZReportDialogOpen] = useState(false);
+  const [closedTradingDay, setClosedTradingDay] = useState<TradingDay | null>(null);
   
   const navigation = [
     { id: 'pos' as ViewType, name: t('nav.pos'), icon: ShoppingCart },
@@ -33,6 +46,19 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
     { id: 'test' as ViewType, name: t('nav.test'), icon: TestTube },
     { id: 'settings' as ViewType, name: t('nav.settings'), icon: Settings },
   ];
+
+  const handleTradingDayClick = () => {
+    if (isDayOpen) {
+      setCloseDayDialogOpen(true);
+    } else {
+      setOpenDayDialogOpen(true);
+    }
+  };
+
+  const handleCloseDay = (closedDay: TradingDay) => {
+    setClosedTradingDay(closedDay);
+    setZReportDialogOpen(true);
+  };
   return (
     <aside
       className={cn(
@@ -66,6 +92,28 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
       
       <nav className="flex-1 p-4 overflow-y-auto">
         <div className="space-y-2">
+          {/* Open/Close Day button */}
+          <Button
+            variant={isDayOpen ? "default" : "ghost"}
+            className={cn(
+              "w-full justify-start",
+              isDayOpen && "bg-primary text-primary-foreground"
+            )}
+            onClick={handleTradingDayClick}
+          >
+            {isDayOpen ? (
+              <>
+                <Moon className="mr-2 h-4 w-4" />
+                <span>{t('tradingDay.closeDay')}</span>
+              </>
+            ) : (
+              <>
+                <Sun className="mr-2 h-4 w-4" />
+                <span>{t('tradingDay.openDay')}</span>
+              </>
+            )}
+          </Button>
+          
           {navigation.map((item) => (
             <Button
               key={item.id}
@@ -82,6 +130,21 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
           ))}
         </div>
       </nav>
+      
+      <OpenDayDialog 
+        open={openDayDialogOpen} 
+        onOpenChange={setOpenDayDialogOpen} 
+      />
+      <CloseDayDialog 
+        open={closeDayDialogOpen} 
+        onOpenChange={setCloseDayDialogOpen}
+        onClose={handleCloseDay}
+      />
+      <ZReportDialog 
+        open={zReportDialogOpen} 
+        onOpenChange={setZReportDialogOpen}
+        tradingDay={closedTradingDay}
+      />
       
       <div className="p-4 border-t border-border">
         <div className="text-sm text-muted-foreground">

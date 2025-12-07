@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Trash2, Plus, Minus, CreditCard, X } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
+import { useTradingDayStore } from '@/stores/useTradingDayStore';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -15,6 +16,7 @@ interface CartProps {
 export function Cart({ onClose }: CartProps) {
   const [showCheckout, setShowCheckout] = useState(false);
   const { cart, removeItem, updateItemQuantity, clearCart } = useCartStore();
+  const { isDayOpen } = useTradingDayStore();
   const { t, locale } = useI18n();
 
   const handleQuantityChange = (itemId: string, newQuantity: number) => {
@@ -25,7 +27,7 @@ export function Cart({ onClose }: CartProps) {
     }
   };
 
-  const canCheckout = cart.items.length > 0;
+  const canCheckout = cart.items.length > 0 && isDayOpen;
 
   return (
     <div className="flex flex-col h-full bg-card">
@@ -155,6 +157,11 @@ export function Cart({ onClose }: CartProps) {
           </div>
         </div>
 
+        {!isDayOpen && (
+          <div className="text-sm text-destructive bg-destructive/10 p-2 rounded mb-2">
+            {t('tradingDay.cannotProcessTransaction')}
+          </div>
+        )}
         <Button 
           className="w-full" 
           size="lg"
@@ -162,7 +169,7 @@ export function Cart({ onClose }: CartProps) {
           onClick={() => setShowCheckout(true)}
         >
           <CreditCard className="mr-2 h-4 w-4" />
-          {t('pos.checkout')} {canCheckout && `(${cart.items.length} ${t('pos.items')})`}
+          {t('pos.checkout')} {cart.items.length > 0 && `(${cart.items.length} ${t('pos.items')})`}
         </Button>
       </div>
 

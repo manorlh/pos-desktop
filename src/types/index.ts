@@ -128,3 +128,34 @@ export interface Receipt {
   printedAt?: Date;
   emailSent?: boolean;
 }
+
+export interface TradingDay {
+  id: string;
+  dayDate: Date;
+  openedAt: Date;
+  closedAt?: Date;
+  openingCash: number;
+  closingCash?: number;
+  expectedCash?: number;
+  actualCash?: number;
+  discrepancy?: number;
+  openedBy: User;
+  closedBy?: User;
+  status: 'open' | 'closed';
+  zReportData?: ZReportData;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ZReportData {
+  totalSales: number;
+  totalTransactions: number;
+  totalItems: number;
+  cashSales: number;
+  taxCollected: number;
+  openingCash: number;
+  expectedCash: number;
+  actualCash: number;
+  discrepancy: number;
+  // Transactions are stored in the transactions table and can be queried by dayDate if needed
+}

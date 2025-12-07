@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Transaction, Cart, Customer, User } from '../types/index';
 import { generateUUID } from '../utils/uuid';
+import { useTradingDayStore } from './useTradingDayStore';
 // Database operations will be added via IPC later
 // import { 
 //   getDatabase,
@@ -46,6 +47,12 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     
     if (!currentUser) {
       throw new Error('No user logged in');
+    }
+
+    // Check if trading day is open
+    const { isDayOpen } = useTradingDayStore.getState();
+    if (!isDayOpen) {
+      throw new Error('Cannot process transaction: Day is closed');
     }
 
     const now = new Date();

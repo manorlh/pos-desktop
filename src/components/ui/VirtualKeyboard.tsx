@@ -230,11 +230,11 @@ export function VirtualKeyboard({
   return (
     <div 
       data-virtual-keyboard
-      className="fixed bottom-0 left-0 right-0 z-[102] bg-background border-t border-border shadow-2xl w-full max-w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-5xl max-h-[560px] overflow-auto touch-manipulation mx-auto transition-transform duration-300 ease-out"
+      className="fixed bottom-0 left-0 right-0 z-[102] bg-background border-t border-border shadow-2xl w-full max-w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-5xl max-h-[45vh] sm:max-h-[50vh] md:max-h-[55vh] lg:max-h-[560px] overflow-auto touch-manipulation mx-auto transition-transform duration-300 ease-out"
       style={{
         transform: isOpen ? 'translateY(0)' : 'translateY(100%)',
         visibility: isOpen ? 'visible' : 'hidden',
-        paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + 1.5rem)`,
+        paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + 0.75rem)`,
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       onClick={(e) => {
@@ -253,14 +253,14 @@ export function VirtualKeyboard({
       tabIndex={-1}
     >
         {/* Header */}
-        <div className="flex items-center justify-between p-2 sm:p-3 md:p-4 border-b border-border gap-2">
+        <div className="flex items-center justify-between p-1.5 sm:p-2 md:p-3 border-b border-border gap-1.5 sm:gap-2">
           <div className="flex-1 min-w-0">
             <input
               type="text"
               value={input}
               readOnly
               className={cn(
-                "w-full px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 text-sm sm:text-base md:text-lg border border-input rounded-md bg-background",
+                "w-full px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm md:text-base border border-input rounded-md bg-background",
                 language === 'hebrew' ? 'text-right' : 'text-left'
               )}
               placeholder={language === 'hebrew' ? 'הקלד כאן...' : 'Type here...'}
@@ -276,13 +276,13 @@ export function VirtualKeyboard({
             <Button
               variant={language === 'hebrew' ? 'default' : 'outline'}
               size="sm"
-              className="sm:size-lg touch-manipulation min-w-[80px] sm:min-w-[100px] md:min-w-[120px] text-xs sm:text-sm md:text-base px-2 sm:px-3 md:px-4"
+              className="touch-manipulation min-w-[60px] sm:min-w-[80px] md:min-w-[100px] text-xs sm:text-sm px-1.5 sm:px-2 h-7 sm:h-8 md:h-9"
               onClick={() => {
                 setLanguage(language === 'hebrew' ? 'english' : 'hebrew');
                 setIsShift(false); // Reset shift when switching languages
               }}
             >
-              <Languages className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              <Languages className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               <span className="hidden sm:inline">{language === 'hebrew' ? 'עברית' : 'English'}</span>
               <span className="sm:hidden">{language === 'hebrew' ? 'עב' : 'EN'}</span>
             </Button>
@@ -291,16 +291,16 @@ export function VirtualKeyboard({
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="touch-manipulation h-8 w-8 sm:h-10 sm:w-10"
+            className="touch-manipulation h-7 w-7 sm:h-8 sm:w-8 md:h-9 md:w-9"
           >
-            <X className="h-4 w-4 sm:h-5 sm:w-5" />
+            <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </Button>
         </div>
 
         {/* Keyboard */}
-        <div className="p-2 sm:p-3 md:p-4 pb-4 sm:pb-5 md:pb-6">
+        <div className="p-1.5 sm:p-2 md:p-3 pb-2 sm:pb-3 md:pb-4">
           {layout.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-1 sm:gap-1.5 md:gap-2 mb-1 sm:mb-1.5 md:mb-2 justify-center flex-wrap">
+            <div key={rowIndex} className="flex gap-0.5 sm:gap-1 md:gap-1.5 mb-0.5 sm:mb-1 md:mb-1.5 justify-center flex-wrap">
               {row.map((key) => {
                 const isSpecial = ['Backspace', 'Enter', 'Shift', 'Space', 'Clear'].includes(key);
                 const isWide = key === 'Space' || key === 'Enter' || key === 'Backspace';
@@ -311,13 +311,13 @@ export function VirtualKeyboard({
                     variant={isShift && key === 'Shift' ? 'default' : 'outline'}
                     className={cn(
                       'touch-manipulation active:scale-95 transition-transform font-semibold',
-                      // Responsive sizing
-                      'min-w-[40px] sm:min-w-[50px] md:min-w-[60px] lg:min-w-[70px]',
-                      'h-10 sm:h-12 md:h-14 lg:h-16',
-                      'text-xs sm:text-sm md:text-base lg:text-lg',
-                      'px-1 sm:px-2 md:px-3',
+                      // Responsive sizing - smaller on small screens
+                      'min-w-[32px] sm:min-w-[40px] md:min-w-[50px] lg:min-w-[60px]',
+                      'h-8 sm:h-10 md:h-12 lg:h-14',
+                      'text-xs sm:text-sm md:text-base',
+                      'px-1 sm:px-1.5 md:px-2',
                       // Wide buttons
-                      isWide && 'flex-1 max-w-[120px] sm:max-w-[150px] md:max-w-[180px] lg:max-w-[200px]',
+                      isWide && 'flex-1 max-w-[80px] sm:max-w-[100px] md:max-w-[150px] lg:max-w-[180px]',
                       isSpecial && 'bg-muted hover:bg-muted/80'
                     )}
                     onClick={() => handleKeyPress(key)}
@@ -347,10 +347,10 @@ export function VirtualKeyboard({
           ))}
           
           {/* Action buttons */}
-          <div className="flex gap-2 sm:gap-3 mt-2 sm:mt-3 md:mt-4 mb-0" dir={language === 'hebrew' ? 'rtl' : 'ltr'}>
+          <div className="flex gap-1.5 sm:gap-2 md:gap-3 mt-1.5 sm:mt-2 md:mt-3 mb-0" dir={language === 'hebrew' ? 'rtl' : 'ltr'}>
             <Button
               variant="outline"
-              className="flex-1 touch-manipulation h-10 sm:h-12 md:h-14 lg:h-16 text-xs sm:text-sm md:text-base lg:text-lg font-semibold"
+              className="flex-1 touch-manipulation h-8 sm:h-10 md:h-12 text-xs sm:text-sm md:text-base font-semibold"
               onClick={() => {
                 setInput('');
                 onInput('');
@@ -360,7 +360,7 @@ export function VirtualKeyboard({
             </Button>
             <Button
               variant="default"
-              className="flex-1 touch-manipulation h-10 sm:h-12 md:h-14 lg:h-16 text-xs sm:text-sm md:text-base lg:text-lg font-semibold"
+              className="flex-1 touch-manipulation h-8 sm:h-10 md:h-12 text-xs sm:text-sm md:text-base font-semibold"
               onClick={() => {
                 onInput(input);
                 onClose();

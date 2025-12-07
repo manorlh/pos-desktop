@@ -52,3 +52,4 @@ try {
   // Don't exit with error - let electron-builder try to handle it
 }
 
+

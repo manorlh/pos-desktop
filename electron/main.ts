@@ -245,6 +245,29 @@ function createSchema(db: any): void {
     )
   `);
 
+  // Trading days table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trading_days (
+      id TEXT PRIMARY KEY,
+      dayDate TEXT NOT NULL,
+      openedAt TEXT NOT NULL,
+      closedAt TEXT,
+      openingCash REAL NOT NULL,
+      closingCash REAL,
+      expectedCash REAL,
+      actualCash REAL,
+      discrepancy REAL,
+      openedBy TEXT NOT NULL,
+      closedBy TEXT,
+      status TEXT NOT NULL,
+      zReportData TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (openedBy) REFERENCES users(id),
+      FOREIGN KEY (closedBy) REFERENCES users(id)
+    )
+  `);
+
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transactions_createdAt ON transactions(createdAt);
@@ -253,6 +276,8 @@ function createSchema(db: any): void {
     CREATE INDEX IF NOT EXISTS idx_transaction_items_transactionId ON transaction_items(transactionId);
     CREATE INDEX IF NOT EXISTS idx_products_categoryId ON products(categoryId);
     CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+    CREATE INDEX IF NOT EXISTS idx_trading_days_dayDate ON trading_days(dayDate);
+    CREATE INDEX IF NOT EXISTS idx_trading_days_status ON trading_days(status);
   `);
 }
 
@@ -745,6 +770,119 @@ function getSetting(db: any, key: string): string | null {
 function setSetting(db: any, key: string, value: string): void {
   const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
   stmt.run(key, value);
+}
+
+// Trading day functions
+function loadTradingDayWithRelations(db: any, row: any): any {
+  const openedByUser = db.prepare('SELECT * FROM users WHERE id = ?').get(row.openedBy);
+  const closedByUser = row.closedBy ? db.prepare('SELECT * FROM users WHERE id = ?').get(row.closedBy) : null;
+  
+  return {
+    id: row.id,
+    dayDate: row.dayDate,
+    openedAt: row.openedAt,
+    closedAt: row.closedAt || undefined,
+    openingCash: row.openingCash,
+    closingCash: row.closingCash || undefined,
+    expectedCash: row.expectedCash || undefined,
+    actualCash: row.actualCash || undefined,
+    discrepancy: row.discrepancy || undefined,
+    openedBy: {
+      id: openedByUser.id,
+      name: openedByUser.name,
+      email: openedByUser.email,
+      role: openedByUser.role,
+      isActive: openedByUser.isActive === 1,
+      createdAt: openedByUser.createdAt,
+      updatedAt: openedByUser.updatedAt,
+    },
+    closedBy: closedByUser ? {
+      id: closedByUser.id,
+      name: closedByUser.name,
+      email: closedByUser.email,
+      role: closedByUser.role,
+      isActive: closedByUser.isActive === 1,
+      createdAt: closedByUser.createdAt,
+      updatedAt: closedByUser.updatedAt,
+    } : undefined,
+    status: row.status,
+    zReportData: row.zReportData ? JSON.parse(row.zReportData) : undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function getCurrentTradingDay(db: any): any | null {
+  const today = new Date();
+  const dayDate = today.toISOString().split('T')[0]; // YYYY-MM-DD
+  
+  const row = db.prepare('SELECT * FROM trading_days WHERE dayDate = ? AND status = ?').get(dayDate, 'open');
+  if (!row) return null;
+  
+  return loadTradingDayWithRelations(db, row);
+}
+
+function getTradingDayByDate(db: any, date: string): any | null {
+  const row = db.prepare('SELECT * FROM trading_days WHERE dayDate = ?').get(date);
+  if (!row) return null;
+  
+  return loadTradingDayWithRelations(db, row);
+}
+
+function getTradingDaysByDateRange(db: any, startDate: string, endDate: string): any[] {
+  const rows = db.prepare(`
+    SELECT * FROM trading_days 
+    WHERE dayDate >= ? AND dayDate <= ?
+    ORDER BY dayDate DESC
+  `).all(startDate, endDate);
+  
+  return rows.map((row: any) => loadTradingDayWithRelations(db, row));
+}
+
+function openTradingDay(db: any, data: any): void {
+  const stmt = db.prepare(`
+    INSERT INTO trading_days 
+    (id, dayDate, openedAt, openingCash, openedBy, status, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  const now = new Date().toISOString();
+  const dayDate = new Date().toISOString().split('T')[0];
+  
+  stmt.run(
+    data.id,
+    dayDate,
+    now,
+    data.openingCash,
+    data.openedBy,
+    'open',
+    now,
+    now
+  );
+}
+
+function closeTradingDay(db: any, id: string, data: any): void {
+  const stmt = db.prepare(`
+    UPDATE trading_days 
+    SET closedAt = ?, closingCash = ?, expectedCash = ?, actualCash = ?, 
+        discrepancy = ?, closedBy = ?, status = ?, zReportData = ?, updatedAt = ?
+    WHERE id = ?
+  `);
+  
+  const now = new Date().toISOString();
+  
+  stmt.run(
+    now,
+    data.closingCash,
+    data.expectedCash,
+    data.actualCash,
+    data.discrepancy,
+    data.closedBy,
+    'closed',
+    data.zReportData ? JSON.stringify(data.zReportData) : null,
+    now,
+    id
+  );
 }
 
 // ============================================================================
@@ -1783,6 +1921,59 @@ ipcMain.handle('db-save-setting', async (event, key: string, value: string) => {
       return { success: false, error: 'Database not initialized' };
     }
     console.error('Error saving setting:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Trading day IPC handlers
+ipcMain.handle('db-get-current-trading-day', async () => {
+  try {
+    const db = getDatabaseMain();
+    return getCurrentTradingDay(db);
+  } catch (error: any) {
+    console.error('Error getting current trading day:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-get-trading-day-by-date', async (event, date: string) => {
+  try {
+    const db = getDatabaseMain();
+    return getTradingDayByDate(db, date);
+  } catch (error: any) {
+    console.error('Error getting trading day by date:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-get-trading-days-by-date-range', async (event, startDate: string, endDate: string) => {
+  try {
+    const db = getDatabaseMain();
+    return getTradingDaysByDateRange(db, startDate, endDate);
+  } catch (error: any) {
+    console.error('Error getting trading days by date range:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('db-open-trading-day', async (event, data: any) => {
+  try {
+    const db = getDatabaseMain();
+    openTradingDay(db, data);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error opening trading day:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-close-trading-day', async (event, id: string, data: any) => {
+  try {
+    const db = getDatabaseMain();
+    closeTradingDay(db, id, data);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error closing trading day:', error);
     return { success: false, error: error.message };
   }
 });

@@ -72,6 +72,13 @@ interface ElectronAPI {
   dbGetSetting: (key: string) => Promise<string | null>;
   dbSaveSetting: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
   
+  // Trading day operations
+  dbGetCurrentTradingDay: () => Promise<any | null>;
+  dbGetTradingDayByDate: (date: string) => Promise<any | null>;
+  dbGetTradingDaysByDateRange: (startDate: string, endDate: string) => Promise<any[]>;
+  dbOpenTradingDay: (data: any) => Promise<{ success: boolean; error?: string }>;
+  dbCloseTradingDay: (id: string, data: any) => Promise<{ success: boolean; error?: string }>;
+  
   onMenuNewSale: (callback: () => void) => void;
   onMainProcessMessage: (callback: (message: string) => void) => void;
 }

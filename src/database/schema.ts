@@ -10,6 +10,7 @@ export interface DatabaseSchema {
   settings: SettingRow;
   business_info: BusinessInfoRow;
   software_info: SoftwareInfoRow;
+  trading_days: TradingDayRow;
 }
 
 export interface ProductRow {
@@ -122,6 +123,24 @@ export interface SoftwareInfoRow {
   manufacturerId: string;
   manufacturerName: string;
   softwareType: string; // 'single-year' | 'multi-year'
+  updatedAt: string; // ISO string
+}
+
+export interface TradingDayRow {
+  id: string;
+  dayDate: string; // YYYY-MM-DD
+  openedAt: string; // ISO string
+  closedAt: string | null; // ISO string
+  openingCash: number;
+  closingCash: number | null;
+  expectedCash: number | null;
+  actualCash: number | null;
+  discrepancy: number | null;
+  openedBy: string; // User ID
+  closedBy: string | null; // User ID
+  status: string; // 'open' | 'closed'
+  zReportData: string | null; // JSON string
+  createdAt: string; // ISO string
   updatedAt: string; // ISO string
 }
 
@@ -272,6 +291,29 @@ export function createSchema(db: any): void {
     )
   `);
 
+  // Trading days table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trading_days (
+      id TEXT PRIMARY KEY,
+      dayDate TEXT NOT NULL,
+      openedAt TEXT NOT NULL,
+      closedAt TEXT,
+      openingCash REAL NOT NULL,
+      closingCash REAL,
+      expectedCash REAL,
+      actualCash REAL,
+      discrepancy REAL,
+      openedBy TEXT NOT NULL,
+      closedBy TEXT,
+      status TEXT NOT NULL,
+      zReportData TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (openedBy) REFERENCES users(id),
+      FOREIGN KEY (closedBy) REFERENCES users(id)
+    )
+  `);
+
   // Create indexes for performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transactions_createdAt ON transactions(createdAt);
@@ -280,6 +322,8 @@ export function createSchema(db: any): void {
     CREATE INDEX IF NOT EXISTS idx_transaction_items_transactionId ON transaction_items(transactionId);
     CREATE INDEX IF NOT EXISTS idx_products_categoryId ON products(categoryId);
     CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+    CREATE INDEX IF NOT EXISTS idx_trading_days_dayDate ON trading_days(dayDate);
+    CREATE INDEX IF NOT EXISTS idx_trading_days_status ON trading_days(status);
   `);
 }
 
