@@ -96,19 +96,19 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
           <Button
             variant={isDayOpen ? "default" : "ghost"}
             className={cn(
-              "w-full justify-start",
+              "w-full justify-start gap-2",
               isDayOpen && "bg-primary text-primary-foreground"
             )}
             onClick={handleTradingDayClick}
           >
             {isDayOpen ? (
               <>
-                <Moon className="mr-2 h-4 w-4" />
+                <Moon className="h-4 w-4 shrink-0" />
                 <span>{t('tradingDay.closeDay')}</span>
               </>
             ) : (
               <>
-                <Sun className="mr-2 h-4 w-4" />
+                <Sun className="h-4 w-4 shrink-0" />
                 <span>{t('tradingDay.openDay')}</span>
               </>
             )}
@@ -119,12 +119,12 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
               key={item.id}
               variant={currentView === item.id ? "default" : "ghost"}
               className={cn(
-                "w-full justify-start",
+                "w-full justify-start gap-2",
                 currentView === item.id && "bg-primary text-primary-foreground"
               )}
               onClick={() => onViewChange(item.id)}
             >
-              <item.icon className="mr-2 h-4 w-4" />
+              <item.icon className="h-4 w-4 shrink-0" />
               <span>{item.name}</span>
             </Button>
           ))}

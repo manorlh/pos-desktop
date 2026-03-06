@@ -41,11 +41,11 @@ export function SettingsPage() {
   const handleSaveTaxRate = async () => {
     const rate = parseFloat(taxRateInput);
     if (isNaN(rate) || rate < 0 || rate > 100) {
-      setTestResult({ success: false, message: 'Tax rate must be a number between 0 and 100' });
+      setTestResult({ success: false, message: t('settings.taxRateInvalid') });
       return;
     }
     await setGlobalTaxRate(rate);
-    setTestResult({ success: true, message: 'Tax rate saved successfully!' });
+    setTestResult({ success: true, message: t('settings.taxRateSavedSuccess') });
   };
 
   const loadDatabasePath = async () => {
@@ -72,7 +72,7 @@ export function SettingsPage() {
 
   const handleTestConnection = async () => {
     if (!dbPath) {
-      setTestResult({ success: false, message: 'Please enter a database path' });
+      setTestResult({ success: false, message: t('settings.pleaseEnterDbPath') });
       return;
     }
 
@@ -85,21 +85,21 @@ export function SettingsPage() {
         // Try to initialize
         const result = await window.electronAPI.initializeDatabase(dbPath);
         if (result.success) {
-          setTestResult({ success: true, message: 'Database connection successful!' });
+          setTestResult({ success: true, message: t('settings.testSuccess') });
         } else {
-          setTestResult({ success: false, message: result.error || 'Failed to connect to database' });
+          setTestResult({ success: false, message: result.error || t('settings.failedToConnect') });
         }
       } else {
         // Try to create new database
         const result = await window.electronAPI.initializeDatabase(dbPath);
         if (result.success) {
-          setTestResult({ success: true, message: 'New database created successfully!' });
+          setTestResult({ success: true, message: t('settings.newDatabaseCreated') });
         } else {
-          setTestResult({ success: false, message: result.error || 'Failed to create database' });
+          setTestResult({ success: false, message: result.error || t('settings.failedToCreateDb') });
         }
       }
     } catch (error: any) {
-      setTestResult({ success: false, message: error.message || 'Connection test failed' });
+      setTestResult({ success: false, message: error.message || t('settings.testFailed') });
     } finally {
       setIsTesting(false);
     }
@@ -107,25 +107,25 @@ export function SettingsPage() {
 
   const handleSavePath = async () => {
     if (!dbPath) {
-      setTestResult({ success: false, message: 'Please enter a database path' });
+      setTestResult({ success: false, message: t('settings.pleaseEnterDbPath') });
       return;
     }
 
     try {
       const result = await window.electronAPI.setDatabasePath(dbPath);
       if (result.success) {
-        setTestResult({ success: true, message: 'Database path saved successfully!' });
+        setTestResult({ success: true, message: t('settings.dbPathSavedSuccess') });
       } else {
-        setTestResult({ success: false, message: result.error || 'Failed to save database path' });
+        setTestResult({ success: false, message: result.error || t('settings.failedToSavePath') });
       }
     } catch (error: any) {
-      setTestResult({ success: false, message: error.message || 'Failed to save database path' });
+      setTestResult({ success: false, message: error.message || t('settings.failedToSavePath') });
     }
   };
 
   const handleBackup = async () => {
     if (!dbPath) {
-      setTestResult({ success: false, message: 'No database path specified' });
+      setTestResult({ success: false, message: t('settings.noDbPathSpecified') });
       return;
     }
 
@@ -133,12 +133,12 @@ export function SettingsPage() {
     try {
       const result = await window.electronAPI.backupDatabase(dbPath);
       if (result.success) {
-        setTestResult({ success: true, message: `Backup created successfully at: ${result.backupPath}` });
+        setTestResult({ success: true, message: t('settings.backupCreatedAt', { path: String(result.backupPath) }) });
       } else {
-        setTestResult({ success: false, message: result.error || 'Failed to create backup' });
+        setTestResult({ success: false, message: result.error || t('settings.failedToCreateBackup') });
       }
     } catch (error: any) {
-      setTestResult({ success: false, message: error.message || 'Failed to create backup' });
+      setTestResult({ success: false, message: error.message || t('settings.failedToCreateBackup') });
     } finally {
       setIsBackingUp(false);
     }
@@ -147,7 +147,7 @@ export function SettingsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">Loading settings...</div>
+        <div className="text-muted-foreground">{t('settings.loading')}</div>
       </div>
     );
   }
@@ -157,10 +157,10 @@ export function SettingsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Settings className="h-8 w-8" />
-          Settings
+          {t('settings.title')}
         </h1>
         <p className="text-muted-foreground mt-2">
-          Configure database and application settings
+          {t('settings.configureDescription')}
         </p>
       </div>
 
@@ -168,20 +168,20 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
-            Database Configuration
+            {t('settings.databaseConfigTitle')}
           </CardTitle>
           <CardDescription>
-            Configure the SQLite database location for storing all POS data
+            {t('settings.databaseConfigDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Database Path</label>
+            <label className="text-sm font-medium">{t('settings.databasePath')}</label>
             <div className="flex gap-2">
               <Input
                 value={dbPath}
                 onChange={(e) => setDbPath(e.target.value)}
-                placeholder="C:\Users\...\pos.db"
+                placeholder={t('settings.databasePathPlaceholder')}
                 className="flex-1"
               />
               <Button
@@ -190,11 +190,11 @@ export function SettingsPage() {
                 className="flex items-center gap-2"
               >
                 <FolderOpen className="h-4 w-4" />
-                Browse...
+                {t('settings.browseButton')}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              The database file will be created at this location if it doesn't exist
+              {t('settings.dbFileCreatedNote')}
             </p>
           </div>
 
@@ -215,13 +215,13 @@ export function SettingsPage() {
               disabled={isTesting || !dbPath}
               variant="outline"
             >
-              {isTesting ? 'Testing...' : 'Test Connection'}
+              {isTesting ? t('settings.testing') : t('settings.testConnection')}
             </Button>
             <Button
               onClick={handleSavePath}
               disabled={!dbPath}
             >
-              Save Path
+              {t('settings.savePath')}
             </Button>
             <Button
               onClick={handleBackup}
@@ -230,17 +230,17 @@ export function SettingsPage() {
               className="flex items-center gap-2"
             >
               <Download className="h-4 w-4" />
-              {isBackingUp ? 'Backing up...' : 'Backup Database'}
+              {isBackingUp ? t('settings.backingUp') : t('settings.backupDatabase')}
             </Button>
           </div>
 
           <div className="mt-4 p-4 bg-muted rounded-lg">
-            <h4 className="font-semibold mb-2">Important Notes:</h4>
+            <h4 className="font-semibold mb-2">{t('settings.importantNotes')}</h4>
             <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-              <li>Changing the database path will require restarting the application</li>
-              <li>Always backup your database before changing the path</li>
-              <li>The database file contains all your products, transactions, and settings</li>
-              <li>Ensure the selected path has write permissions</li>
+              <li>{t('settings.dbPathChangeNote')}</li>
+              <li>{t('settings.backupBeforeChange')}</li>
+              <li>{t('settings.dbContainsAll')}</li>
+              <li>{t('settings.ensureWritePermissions')}</li>
             </ul>
           </div>
         </CardContent>
@@ -250,15 +250,15 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Percent className="h-5 w-5" />
-            Tax Settings
+            {t('settings.taxSettings')}
           </CardTitle>
           <CardDescription>
-            Configure global tax rate for all products
+            {t('settings.taxConfigDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="tax-rate">Global Tax Rate (%)</Label>
+            <Label htmlFor="tax-rate">{t('settings.taxRate')}</Label>
             <div className="flex gap-2">
               <Input
                 id="tax-rate"
@@ -272,11 +272,11 @@ export function SettingsPage() {
                 className="flex-1"
               />
               <Button onClick={handleSaveTaxRate}>
-                Save
+                {t('settings.save')}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              All product prices include tax. This rate is used to calculate tax breakdown in receipts.
+              {t('settings.taxIncludeNote')}
             </p>
           </div>
         </CardContent>
@@ -286,20 +286,20 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Keyboard className="h-5 w-5" />
-            Interface Settings
+            {t('settings.interfaceSettings')}
           </CardTitle>
           <CardDescription>
-            Configure interface and input settings
+            {t('settings.interfaceConfigDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label htmlFor="virtual-keyboard" className="text-base">
-                Virtual Keyboard
+                {t('settings.virtualKeyboard')}
               </Label>
               <p className="text-sm text-muted-foreground">
-                Enable or disable the virtual keyboard for touch input
+                {t('settings.virtualKeyboardTouchDesc')}
               </p>
             </div>
             <Switch
@@ -344,8 +344,8 @@ export function SettingsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="he">עברית (Hebrew)</SelectItem>
-                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="he">{t('settings.languageHebrew')}</SelectItem>
+                <SelectItem value="en">{t('settings.languageEnglish')}</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">

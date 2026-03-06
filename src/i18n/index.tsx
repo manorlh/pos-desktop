@@ -8,7 +8,7 @@ type Translations = typeof en;
 interface I18nContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string>) => string;
   locale: string;
 }
 
@@ -39,7 +39,7 @@ export function I18nProvider({ children, defaultLanguage = 'he' }: I18nProviderP
     setLanguage(defaultLanguage);
   }, [defaultLanguage]);
 
-  const t = (key: string): string => {
+  const t = (key: string, params?: Record<string, string>): string => {
     const keys = key.split('.');
     let value: any = translations[language];
     
@@ -60,7 +60,13 @@ export function I18nProvider({ children, defaultLanguage = 'he' }: I18nProviderP
       }
     }
     
-    return typeof value === 'string' ? value : key;
+    let result = typeof value === 'string' ? value : key;
+    if (params) {
+      for (const [paramKey, paramValue] of Object.entries(params)) {
+        result = result.replace(new RegExp(`\\{\\{${paramKey}\\}\\}`, 'g'), paramValue);
+      }
+    }
+    return result;
   };
 
   const locale = language === 'he' ? 'he-IL' : 'en-US';

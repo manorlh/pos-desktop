@@ -187,6 +187,12 @@ function createSchema(db: any): void {
     )
   `);
 
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN refundOfTransactionId TEXT REFERENCES transactions(id)`);
+  } catch (_) {
+    // Column already exists
+  }
+
   // Transaction items table
   db.exec(`
     CREATE TABLE IF NOT EXISTS transaction_items (
@@ -539,6 +545,7 @@ function loadTransactionWithRelations(db: any, row: any): any {
     whtDeduction: row.whtDeduction || undefined,
     amountTendered: row.amountTendered || undefined,
     changeAmount: row.changeAmount || undefined,
+    refundOfTransactionId: row.refundOfTransactionId || undefined,
   };
 }
 
@@ -568,39 +575,65 @@ function getTransactionsByDateRange(db: any, startDate: string, endDate: string)
 }
 
 function getTransactionsPage(db: any, options: any): { transactions: any[]; total: number } {
-  const { startDate, endDate, limit = 50, offset = 0, status } = options;
+  const { startDate, endDate, limit = 50, offset = 0, status, searchQuery } = options;
   
+  // Build WHERE clause and params
   let whereClause = '1=1';
   const params: any[] = [];
   
   if (startDate) {
-    whereClause += ' AND datetime(createdAt) >= datetime(?)';
+    whereClause += ' AND datetime(transactions.createdAt) >= datetime(?)';
     params.push(startDate);
   }
   
   if (endDate) {
-    whereClause += ' AND datetime(createdAt) <= datetime(?)';
+    whereClause += ' AND datetime(transactions.createdAt) <= datetime(?)';
     params.push(endDate);
   }
   
   if (status) {
-    whereClause += ' AND status = ?';
+    whereClause += ' AND transactions.status = ?';
     params.push(status);
   }
   
-  // Get total count
-  const countStmt = db.prepare(`SELECT COUNT(*) as count FROM transactions WHERE ${whereClause}`);
-  const countResult = countStmt.get(...params);
+  // Add search conditions
+  if (searchQuery && searchQuery.trim()) {
+    const searchTerm = `%${searchQuery.trim()}%`;
+    whereClause += ` AND (
+      transactions.transactionNumber LIKE ? OR
+      customers.name LIKE ? OR
+      users.name LIKE ?
+    )`;
+    params.push(searchTerm, searchTerm, searchTerm);
+  }
+  
+  // Build JOIN clause (always needed for search, but also safe to include always)
+  const joinClause = `
+    LEFT JOIN customers ON transactions.customerId = customers.id
+    LEFT JOIN users ON transactions.cashierId = users.id
+  `;
+  
+  // Get total count with JOINs and search
+  const countParams = [...params];
+  const countStmt = db.prepare(`
+    SELECT COUNT(DISTINCT transactions.id) as count 
+    FROM transactions
+    ${joinClause}
+    WHERE ${whereClause}
+  `);
+  const countResult = countStmt.get(...countParams);
   const total = countResult.count;
   
-  // Get paginated results
-  params.push(limit, offset);
+  // Get paginated results with JOINs
+  const selectParams = [...params, limit, offset];
   const rows = db.prepare(`
-    SELECT * FROM transactions 
+    SELECT DISTINCT transactions.* 
+    FROM transactions
+    ${joinClause}
     WHERE ${whereClause}
-    ORDER BY createdAt DESC
+    ORDER BY transactions.createdAt DESC
     LIMIT ? OFFSET ?
-  `).all(...params);
+  `).all(...selectParams);
   
   const transactions = rows.map((row: any) => loadTransactionWithRelations(db, row));
   
@@ -613,8 +646,8 @@ function saveTransaction(db: any, transaction: any): void {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -632,6 +665,7 @@ function saveTransaction(db: any, transaction: any): void {
       transaction.whtDeduction || null,
       transaction.amountTendered || null,
       transaction.changeAmount || null,
+      transaction.refundOfTransactionId || null,
       transaction.createdAt,
       transaction.updatedAt
     );
@@ -662,13 +696,16 @@ function saveTransaction(db: any, transaction: any): void {
       );
     }
     
-    // Update product stock quantities if transaction is completed
+    // Update product stock: refunds increase stock, completed sales decrease stock
     if (transaction.status === 'completed') {
+      const isRefund = Boolean(transaction.refundOfTransactionId);
       for (const item of transaction.cart.items) {
-        // Get current stock
         const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId);
         if (product) {
-          const newStockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          const currentStock = product.stockQuantity;
+          const newStockQuantity = isRefund
+            ? currentStock + item.quantity
+            : Math.max(0, currentStock - item.quantity);
           const updateProductStock = db.prepare(`
             UPDATE products 
             SET stockQuantity = ?,
@@ -676,7 +713,6 @@ function saveTransaction(db: any, transaction: any): void {
                 updatedAt = ?
             WHERE id = ?
           `);
-          
           updateProductStock.run(
             newStockQuantity,
             newStockQuantity > 0 ? 1 : 0,
@@ -689,6 +725,11 @@ function saveTransaction(db: any, transaction: any): void {
   });
   
   trans();
+}
+
+function updateTransactionStatus(db: any, transactionId: string, status: string): void {
+  const now = new Date().toISOString();
+  db.prepare('UPDATE transactions SET status = ?, updatedAt = ? WHERE id = ?').run(status, now, transactionId);
 }
 
 function getBusinessInfo(db: any): any | null {
@@ -1361,44 +1402,58 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     recordCounts.A100 = 1;
     recordNumber++;
     
-    // Process transactions - simplified version
-    // In production, use the full taxReportGenerator utility
+    // Map transactions by id for refund→original lookup
+    const txById = new Map<string, any>(transactions.map((t: any) => [t.id, t]));
+
+    // Process transactions (sales and refunds)
     for (const transaction of transactions) {
-      // C100 - Document header (simplified)
+      const isRefund = Boolean(transaction.refundOfTransactionId);
+      const originalTx = isRefund ? txById.get(transaction.refundOfTransactionId) : null;
+      // Refund document type 330 (Credit Tax Invoice); sales use 305/400
+      const docType = isRefund ? 330 : transaction.documentType;
+      const docProductionDate = transaction.documentProductionDate
+        ? new Date(transaction.documentProductionDate)
+        : new Date(transaction.createdAt);
+
+      // C100 - Document header
       let c100 = 'C100';
       c100 += padLeft(recordNumber.toString(), 9, '0');
       c100 += padLeft(businessInfo.vatNumber, 9, '0');
       c100 += padRight('', 9);
-      c100 += padLeft(transaction.documentType.toString(), 3, '0');
+      c100 += padLeft(String(docType), 3, '0');
       c100 += padRight(transaction.transactionNumber, 20);
-      c100 += formatDate(transaction.documentProductionDate);
+      c100 += formatDate(docProductionDate);
       c100 += padRight('', 250);
       c100 += transaction.documentDiscount ? formatAmount(-Math.abs(transaction.documentDiscount), 15) : padRight('', 15);
       c100 += padRight('', 45);
       c100 += transaction.whtDeduction ? formatAmount(Math.abs(transaction.whtDeduction), 12) : padRight('', 12);
       c100 += padRight('', 26);
       c100 += formatDate(transaction.createdAt);
-      c100 += transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7);
+      c100 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
+      c100 += isRefund ? '0' : '0'; // Field 1228 Document Cancelled: 0 for normal refunds/sales
       c100 += padRight('', 444 - c100.length);
       bkmvLines.push(c100);
       recordCounts.C100++;
       recordNumber++;
-      
-      // D110 - Document details (simplified)
+
+      // D110 - Document details (for refunds: link to base document via 1256, 1257, 1274)
       let lineNum = 1;
+      const baseDocType = originalTx ? String(originalTx.documentType) : '';
+      const baseDocNumber = originalTx ? originalTx.transactionNumber : '';
+      const baseDocBranchId = originalTx?.branchId ? padRight(originalTx.branchId, 7).slice(0, 7) : '';
       for (const item of transaction.cart.items) {
         let d110 = 'D110';
         d110 += padLeft(recordNumber.toString(), 9, '0');
         d110 += padLeft(businessInfo.vatNumber, 9, '0');
         d110 += padRight('', 9);
-        d110 += padLeft(transaction.documentType.toString(), 3, '0');
+        d110 += padLeft(String(docType), 3, '0');
         d110 += padRight(transaction.transactionNumber, 20);
         d110 += padLeft(lineNum.toString(), 4, '0');
-        d110 += padRight('', 3);
-        d110 += padRight('', 20);
-        d110 += String(item.transactionType || 2);
-        d110 += padRight(item.product.sku || '', 20);
-        d110 += padRight(item.product.name, 30);
+        d110 += padRight(baseDocType, 3).slice(0, 3);
+        d110 += padRight(baseDocNumber, 20).slice(0, 20);
+        d110 += String(item.transactionType ?? 2).slice(0, 1);
+        d110 += padRight(item.product?.sku ?? '', 20).slice(0, 20);
+        d110 += padRight(item.product?.name ?? '', 30).slice(0, 30);
         d110 += padRight('', 50);
         d110 += padRight('', 30);
         d110 += padRight('', 20);
@@ -1408,10 +1463,9 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
         d110 += formatAmount(item.unitPrice, 15);
         d110 += item.lineDiscount ? formatAmount(-Math.abs(item.lineDiscount), 15) : padRight('', 15);
         d110 += formatAmount(item.totalPrice, 15);
-        // Use global tax rate (already retrieved at function start)
         const vatPercent = Math.round(taxRate);
         d110 += padLeft(vatPercent.toString(), 2, '0');
-        d110 += transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7);
+        d110 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
         d110 += formatDate(transaction.createdAt);
         d110 += padRight('', 339 - d110.length);
         bkmvLines.push(d110);
@@ -1419,39 +1473,32 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
         recordNumber++;
         lineNum++;
       }
-      
-      // D120 - Payment details (simplified)
-      const paymentTypeMap: Record<string, number> = {
-        'cash': 1,
-        'check': 2,
-        'card': 3,
-        'digital': 4,
-        'gift_card': 9,
-      };
-      const paymentType = paymentTypeMap[transaction.paymentDetails.method.type] || 9;
-      
+
+      // D120 - Payment details (cash-only: type 1, amount = amountTendered or cart.totalAmount)
+      const paymentAmount =
+        transaction.amountTendered != null
+          ? Number(transaction.amountTendered)
+          : (transaction.cart?.totalAmount ?? 0);
+      const paymentType = 1; // 1 = cash (app is cash-only)
+
       let d120 = 'D120';
       d120 += padLeft(recordNumber.toString(), 9, '0');
       d120 += padLeft(businessInfo.vatNumber, 9, '0');
       d120 += padRight('', 9);
-      d120 += padLeft(transaction.documentType.toString(), 3, '0');
+      d120 += padLeft(String(docType), 3, '0');
       d120 += padRight(transaction.transactionNumber, 20);
       d120 += padLeft('1', 4, '0');
       d120 += String(paymentType);
-      d120 += transaction.paymentDetails.method.type === 'check' && transaction.paymentDetails.bankNumber
-        ? padLeft(transaction.paymentDetails.bankNumber, 10, '0')
-        : padRight('', 10);
+      d120 += padRight('', 10);
       d120 += padRight('', 10);
       d120 += padRight('', 15);
       d120 += padRight('', 10);
       d120 += padRight('', 8);
-      d120 += formatAmount(transaction.paymentDetails.amount, 15);
+      d120 += formatAmount(paymentAmount, 15);
       d120 += padRight('', 1);
       d120 += padRight('', 20);
-      d120 += transaction.paymentDetails.method.type === 'card' && transaction.paymentDetails.creditTransactionType
-        ? String(transaction.paymentDetails.creditTransactionType)
-        : padRight('', 1);
-      d120 += transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7);
+      d120 += padRight('', 1);
+      d120 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
       d120 += formatDate(transaction.createdAt);
       d120 += padRight('', 7);
       d120 += padRight('', 222 - d120.length);
@@ -1848,6 +1895,17 @@ ipcMain.handle('db-save-transaction', async (event, transaction: any) => {
     return { success: true };
   } catch (error: any) {
     console.error('Error saving transaction:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('db-update-transaction-status', async (event, transactionId: string, status: string) => {
+  try {
+    const db = getDatabaseMain();
+    updateTransactionStatus(db, transactionId, status);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating transaction status:', error);
     return { success: false, error: error.message };
   }
 });

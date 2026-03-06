@@ -293,6 +293,7 @@ function loadTransactionWithRelations(db: any, row: TransactionRow): Transaction
     whtDeduction: row.whtDeduction || undefined,
     amountTendered: row.amountTendered || undefined,
     changeAmount: row.changeAmount || undefined,
+    refundOfTransactionId: row.refundOfTransactionId || undefined,
   };
 }
 
@@ -302,8 +303,8 @@ export function saveTransaction(db: any, transaction: Transaction): void {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -321,6 +322,7 @@ export function saveTransaction(db: any, transaction: Transaction): void {
       transaction.whtDeduction || null,
       transaction.amountTendered || null,
       transaction.changeAmount || null,
+      transaction.refundOfTransactionId || null,
       transaction.createdAt.toISOString(),
       transaction.updatedAt.toISOString()
     );
@@ -351,13 +353,16 @@ export function saveTransaction(db: any, transaction: Transaction): void {
       );
     }
     
-    // Update product stock quantities if transaction is completed
+    // Update product stock: refunds increase stock, completed sales decrease stock
     if (transaction.status === 'completed') {
+      const isRefund = Boolean(transaction.refundOfTransactionId);
       for (const item of transaction.cart.items) {
-        // Get current stock
-        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId);
+        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId) as { stockQuantity: number } | undefined;
         if (product) {
-          const newStockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          const currentStock = product.stockQuantity;
+          const newStockQuantity = isRefund
+            ? currentStock + item.quantity
+            : Math.max(0, currentStock - item.quantity);
           const updateProductStock = db.prepare(`
             UPDATE products 
             SET stockQuantity = ?,
@@ -365,7 +370,6 @@ export function saveTransaction(db: any, transaction: Transaction): void {
                 updatedAt = ?
             WHERE id = ?
           `);
-          
           updateProductStock.run(
             newStockQuantity,
             newStockQuantity > 0 ? 1 : 0,
@@ -378,6 +382,11 @@ export function saveTransaction(db: any, transaction: Transaction): void {
   });
   
   trans();
+}
+
+export function updateTransactionStatus(db: any, transactionId: string, status: Transaction['status']): void {
+  const now = new Date().toISOString();
+  db.prepare('UPDATE transactions SET status = ?, updatedAt = ? WHERE id = ?').run(status, now, transactionId);
 }
 
 export function getTodaysTransactions(db: any): Transaction[] {

@@ -93,6 +93,8 @@ export interface Transaction {
   // Cash payment fields (cash-only POS)
   amountTendered?: number; // Cash amount tendered
   changeAmount?: number; // Change given
+  // Refund link: when set, this transaction is a refund (credit) document for the original sale
+  refundOfTransactionId?: string;
 }
 
 export interface User {

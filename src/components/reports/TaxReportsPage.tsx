@@ -3,10 +3,13 @@ import { FileText, Download, CheckCircle, AlertCircle, Loader2 } from 'lucide-re
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useBusinessStore } from '@/stores/useBusinessStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useI18n } from '@/i18n';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Label } from '../ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Switch } from '../ui/switch';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 
 interface ExportResult {
@@ -18,10 +21,12 @@ interface ExportResult {
 }
 
 export function TaxReportsPage() {
+  const { t } = useI18n();
   const { transactions, getTransactionsByDateRange } = useTransactionStore();
-  const { businessInfo, softwareInfo, taxReportConfig } = useBusinessStore();
+  const { businessInfo, softwareInfo, taxReportConfig, setBusinessInfo, saveToDatabase } = useBusinessStore();
   const { globalTaxRate } = useSettingsStore();
-  
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const [exportMode, setExportMode] = useState<'date-range' | 'year'>('date-range');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -67,7 +72,7 @@ export function TaxReportsPage() {
     if (!exportPath) {
       setExportResult({
         success: false,
-        error: useCustomPath ? 'Please select a custom path' : 'Please select a drive',
+        error: useCustomPath ? t('reports.pleaseSelectCustomPath') : t('reports.pleaseSelectDrive'),
       });
       return;
     }
@@ -79,7 +84,7 @@ export function TaxReportsPage() {
       if (!startDate || !endDate) {
         setExportResult({
           success: false,
-          error: 'Please select both start and end dates',
+          error: t('reports.pleaseSelectBothDates'),
         });
         return;
       }
@@ -91,7 +96,7 @@ export function TaxReportsPage() {
       if (!start || !end) {
         setExportResult({
           success: false,
-          error: 'Invalid date format. Please use DDMMYYYY format',
+          error: t('reports.invalidDateFormat'),
         });
         return;
       }
@@ -99,7 +104,7 @@ export function TaxReportsPage() {
       if (start > end) {
         setExportResult({
           success: false,
-          error: 'Start date must be before end date',
+          error: t('reports.startBeforeEnd'),
         });
         return;
       }
@@ -112,7 +117,7 @@ export function TaxReportsPage() {
       if (isNaN(year) || year < 2000 || year > 2100) {
         setExportResult({
           success: false,
-          error: 'Please enter a valid year (2000-2100)',
+          error: t('reports.validYear'),
         });
         return;
       }
@@ -127,7 +132,7 @@ export function TaxReportsPage() {
     if (filteredTransactions.length === 0) {
       setExportResult({
         success: false,
-        error: 'No transactions found for the selected date range',
+        error: t('reports.noTransactionsForRange'),
       });
       return;
     }
@@ -158,13 +163,12 @@ export function TaxReportsPage() {
           dateRange,
         });
       } else {
-        // Fallback for development/testing
-        throw new Error('Tax report generation not yet implemented in Electron');
+        throw new Error(t('reports.reportNotImplemented'));
       }
     } catch (error: any) {
       setExportResult({
         success: false,
-        error: error.message || 'Failed to generate tax report',
+        error: error.message || t('reports.reportFailed'),
       });
     } finally {
       setIsLoading(false);
@@ -196,25 +200,24 @@ export function TaxReportsPage() {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <FileText className="h-8 w-8" />
-          Tax Authority Reports
+          {t('reports.taxAuthorityTitle')}
         </h1>
         <p className="text-muted-foreground mt-2">
-          Generate Israel Tax Authority compliant OPEN FORMAT files (INI.TXT and BKMVDATA.TXT)
+          {t('reports.taxAuthorityDescription')}
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Export Configuration</CardTitle>
+          <CardTitle>{t('reports.exportConfig')}</CardTitle>
           <CardDescription>
-            Configure the export parameters for tax authority compliance
+            {t('reports.exportConfigDescription')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Export Location Selection */}
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Export Location</label>
+              <label className="text-sm font-medium">{t('reports.exportLocation')}</label>
               <Select 
                 value={useCustomPath ? 'custom' : 'drive'} 
                 onValueChange={(value) => {
@@ -230,19 +233,19 @@ export function TaxReportsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="drive">Select Drive (Standard Structure)</SelectItem>
-                  <SelectItem value="custom">Choose Custom Path</SelectItem>
+                  <SelectItem value="drive">{t('reports.selectDrive')}</SelectItem>
+                  <SelectItem value="custom">{t('reports.chooseCustomPath')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {useCustomPath ? (
               <div className="space-y-2">
-                <label className="text-sm font-medium">Custom Export Path</label>
+                <label className="text-sm font-medium">{t('reports.customExportPath')}</label>
                 <div className="flex gap-2">
                   <Input
                     type="text"
-                    placeholder="Select or enter path..."
+                    placeholder={t('reports.selectOrEnterPath')}
                     value={customPath}
                     onChange={(e) => setCustomPath(e.target.value)}
                     className="flex-1"
@@ -259,25 +262,25 @@ export function TaxReportsPage() {
                       }
                     }}
                   >
-                    Browse...
+                    {t('settings.browseButton')}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Files will be saved to: <span className="font-mono">{customPath || 'Not selected'}/OPENFRMT/...</span>
+                  {t('reports.filesSavedTo')} <span className="font-mono">{customPath || t('reports.notSelected')}/OPENFRMT/...</span>
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
-                <label className="text-sm font-medium">Output Drive</label>
+                <label className="text-sm font-medium">{t('reports.outputDrive')}</label>
                 {isLoadingDrives ? (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Loading available drives...</span>
+                    <span>{t('reports.loadingDrives')}</span>
                   </div>
                 ) : (
                   <Select value={selectedDrive} onValueChange={setSelectedDrive}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select drive" />
+                      <SelectValue placeholder={t('reports.selectDrivePlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
                       {availableDrives.map((drive) => (
@@ -289,31 +292,29 @@ export function TaxReportsPage() {
                   </Select>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Files will be saved to: <span className="font-mono">{selectedDrive || 'Not selected'}/OPENFRMT/...</span>
+                  {t('reports.filesSavedTo')} <span className="font-mono">{selectedDrive || t('reports.notSelected')}/OPENFRMT/...</span>
                 </p>
               </div>
             )}
           </div>
 
-          {/* Export Mode Selection */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Export Mode</label>
+            <label className="text-sm font-medium">{t('reports.exportMode')}</label>
             <Select value={exportMode} onValueChange={(value: 'date-range' | 'year') => setExportMode(value)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="date-range">Date Range (Multi-Year)</SelectItem>
-                <SelectItem value="year">Tax Year (Single-Year)</SelectItem>
+                <SelectItem value="date-range">{t('reports.dateRangeMultiYear')}</SelectItem>
+                <SelectItem value="year">{t('reports.taxYearSingleYear')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* Date Range or Year Input */}
           {exportMode === 'date-range' ? (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Start Date (DDMMYYYY)</label>
+                <label className="text-sm font-medium">{t('reports.startDateDDMMYYYY')}</label>
                 <Input
                   type="text"
                   placeholder="DDMMYYYY"
@@ -328,7 +329,7 @@ export function TaxReportsPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">End Date (DDMMYYYY)</label>
+                <label className="text-sm font-medium">{t('reports.endDateDDMMYYYY')}</label>
                 <Input
                   type="text"
                   placeholder="DDMMYYYY"
@@ -345,7 +346,7 @@ export function TaxReportsPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              <label className="text-sm font-medium">Tax Year (YYYY)</label>
+              <label className="text-sm font-medium">{t('reports.taxYearYYYY')}</label>
               <Input
                 type="text"
                 placeholder="YYYY"
@@ -356,22 +357,113 @@ export function TaxReportsPage() {
             </div>
           )}
 
-          {/* Business Info Display */}
-          <div className="border-t pt-4 space-y-2">
-            <h3 className="font-semibold">Business Information</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">VAT Number:</span>
-                <span className="ml-2 font-medium">{businessInfo.vatNumber}</span>
+          <div className="border-t pt-4 space-y-4">
+            <h3 className="font-semibold">{t('reports.businessInfo')}</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="business-vat">{t('reports.vatNumber')}</Label>
+                <Input
+                  id="business-vat"
+                  value={businessInfo.vatNumber}
+                  onChange={(e) => setBusinessInfo({ vatNumber: e.target.value.replace(/\D/g, '').slice(0, 9) })}
+                  maxLength={9}
+                  placeholder={t('reports.vatNumberHint')}
+                />
               </div>
-              <div>
-                <span className="text-muted-foreground">Company:</span>
-                <span className="ml-2 font-medium">{businessInfo.companyName}</span>
+              <div className="space-y-2">
+                <Label htmlFor="business-company">{t('reports.companyName')}</Label>
+                <Input
+                  id="business-company"
+                  value={businessInfo.companyName}
+                  onChange={(e) => setBusinessInfo({ companyName: e.target.value })}
+                />
               </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="business-address">{t('reports.companyAddress')}</Label>
+                <Input
+                  id="business-address"
+                  value={businessInfo.companyAddress}
+                  onChange={(e) => setBusinessInfo({ companyAddress: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="business-addr-no">{t('reports.companyAddressNumber')}</Label>
+                <Input
+                  id="business-addr-no"
+                  value={businessInfo.companyAddressNumber}
+                  onChange={(e) => setBusinessInfo({ companyAddressNumber: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="business-city">{t('reports.companyCity')}</Label>
+                <Input
+                  id="business-city"
+                  value={businessInfo.companyCity}
+                  onChange={(e) => setBusinessInfo({ companyCity: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="business-zip">{t('reports.companyZip')}</Label>
+                <Input
+                  id="business-zip"
+                  value={businessInfo.companyZip}
+                  onChange={(e) => setBusinessInfo({ companyZip: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="business-reg">{t('reports.companyRegNumber')}</Label>
+                <Input
+                  id="business-reg"
+                  value={businessInfo.companyRegNumber ?? ''}
+                  onChange={(e) => setBusinessInfo({ companyRegNumber: e.target.value || undefined })}
+                />
+              </div>
+              <div className="space-y-2 flex items-end pb-2">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="business-branches"
+                    checked={businessInfo.hasBranches}
+                    onCheckedChange={(checked) => setBusinessInfo({ hasBranches: checked })}
+                  />
+                  <Label htmlFor="business-branches">{t('reports.hasBranches')}</Label>
+                </div>
+              </div>
+              {businessInfo.hasBranches && (
+                <div className="space-y-2">
+                  <Label htmlFor="business-branch-id">{t('reports.branchId')}</Label>
+                  <Input
+                    id="business-branch-id"
+                    value={businessInfo.branchId ?? ''}
+                    onChange={(e) => setBusinessInfo({ branchId: e.target.value.slice(0, 7) || undefined })}
+                    maxLength={7}
+                    placeholder={t('reports.branchIdHint')}
+                  />
+                </div>
+              )}
             </div>
+            {saveMessage && (
+              <p className={saveMessage.type === 'success' ? 'text-sm text-green-600 dark:text-green-400' : 'text-sm text-destructive'}>
+                {saveMessage.text}
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                setSaveMessage(null);
+                try {
+                  await saveToDatabase();
+                  setSaveMessage({ type: 'success', text: t('reports.saveBusinessInfoSuccess') });
+                } catch {
+                  setSaveMessage({ type: 'error', text: t('reports.saveBusinessInfoFailed') });
+                }
+              }}
+            >
+              {t('reports.saveBusinessInfo')}
+            </Button>
           </div>
 
-          {/* Export Button */}
           <Button
             onClick={handleExport}
             disabled={isLoading || (!selectedDrive && !customPath)}
@@ -381,19 +473,18 @@ export function TaxReportsPage() {
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating Report...
+                {t('reports.generatingReport')}
               </>
             ) : (
               <>
                 <Download className="mr-2 h-4 w-4" />
-                Generate Tax Report
+                {t('reports.generateTaxReport')}
               </>
             )}
           </Button>
         </CardContent>
       </Card>
 
-      {/* Export Results */}
       {exportResult && (
         <Alert variant={exportResult.success ? 'default' : 'destructive'}>
           {exportResult.success ? (
@@ -401,24 +492,24 @@ export function TaxReportsPage() {
           ) : (
             <AlertCircle className="h-4 w-4" />
           )}
-          <AlertTitle>{exportResult.success ? 'Export Successful' : 'Export Failed'}</AlertTitle>
+          <AlertTitle>{exportResult.success ? t('reports.exportSuccess') : t('reports.exportFailed')}</AlertTitle>
           <AlertDescription>
             {exportResult.success ? (
               <div className="space-y-2 mt-2">
                 <p>
-                  <strong>File Path:</strong> {exportResult.filePath}
+                  <strong>{t('reports.filePath')}</strong> {exportResult.filePath}
                 </p>
                 {exportResult.dateRange && (
                   <p>
-                    <strong>Date Range:</strong>{' '}
+                    <strong>{t('reports.dateRange')}</strong>{' '}
                     {'year' in exportResult.dateRange
-                      ? `Year ${exportResult.dateRange.year}`
-                      : `${formatDateDDMMYYYY(exportResult.dateRange.start)} to ${formatDateDDMMYYYY(exportResult.dateRange.end)}`}
+                      ? `${t('reports.yearLabel')} ${exportResult.dateRange.year}`
+                      : `${formatDateDDMMYYYY(exportResult.dateRange.start)} ${t('transactions.to')} ${formatDateDDMMYYYY(exportResult.dateRange.end)}`}
                   </p>
                 )}
                 {exportResult.recordCounts && (
                   <div className="mt-2">
-                    <strong>Record Counts:</strong>
+                    <strong>{t('reports.recordCounts')}</strong>
                     <ul className="list-disc list-inside mt-1 space-y-1">
                       {Object.entries(exportResult.recordCounts).map(([type, count]) => (
                         <li key={type}>
@@ -429,7 +520,7 @@ export function TaxReportsPage() {
                   </div>
                 )}
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Files have been generated and compressed according to tax authority specifications.
+                  {t('reports.filesGeneratedNote')}
                 </p>
               </div>
             ) : (

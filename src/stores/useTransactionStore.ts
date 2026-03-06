@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { Transaction, Cart, Customer, User } from '../types/index';
+import type { Transaction, Cart, CartItem, Customer, User } from '../types/index';
 import { generateUUID } from '../utils/uuid';
 import { useTradingDayStore } from './useTradingDayStore';
+import { useSettingsStore } from './useSettingsStore';
 // Database operations will be added via IPC later
 // import { 
 //   getDatabase,
@@ -32,6 +33,11 @@ interface TransactionStore {
   setCurrentUser: (user: User) => void;
   generateTransactionNumber: () => string;
   loadTodaysTransactions: () => Promise<void>;
+  createRefundTransaction: (
+    originalTransaction: Transaction,
+    options: { fullRefund: boolean; partialItems?: { itemId: string; quantity: number }[]; amountReturned?: number }
+  ) => Promise<Transaction>;
+  updateTransactionStatus: (transactionId: string, status: Transaction['status']) => Promise<void>;
 }
 
 export const useTransactionStore = create<TransactionStore>((set, get) => ({
@@ -201,6 +207,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           whtDeduction: tx.whtDeduction,
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
+          refundOfTransactionId: tx.refundOfTransactionId,
         }));
       } else {
         // Fallback to in-memory
@@ -252,6 +259,12 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
         if (filters?.endDate) {
           options.endDate = filters.endDate.toISOString();
         }
+        if (filters?.searchQuery) {
+          options.searchQuery = filters.searchQuery;
+        }
+        if (filters?.status) {
+          options.status = filters.status;
+        }
         
         const result = await window.electronAPI.dbGetTransactionsPage(options);
         
@@ -294,6 +307,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           whtDeduction: tx.whtDeduction,
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
+          refundOfTransactionId: tx.refundOfTransactionId,
         }));
         
         return { transactions, total: result.total };
@@ -363,6 +377,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           whtDeduction: tx.whtDeduction,
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
+          refundOfTransactionId: tx.refundOfTransactionId,
         }));
         set({ transactions });
       } else {
@@ -372,5 +387,147 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       console.error('Failed to load today\'s transactions:', error);
       set({ transactions: [] });
     }
+  },
+
+  createRefundTransaction: async (
+    originalTransaction: Transaction,
+    options: { fullRefund: boolean; partialItems?: { itemId: string; quantity: number }[]; amountReturned?: number }
+  ): Promise<Transaction> => {
+    const { currentUser, generateTransactionNumber } = get();
+    if (!currentUser) throw new Error('No user logged in');
+    const { isDayOpen } = useTradingDayStore.getState();
+    if (!isDayOpen) throw new Error('Cannot process refund: Day is closed');
+
+    let items: CartItem[];
+    if (options.fullRefund) {
+      items = originalTransaction.cart.items.map((item) => ({
+        ...item,
+        id: generateUUID(),
+        quantity: item.quantity,
+        totalPrice: item.totalPrice,
+      }));
+    } else if (options.partialItems?.length) {
+      items = options.partialItems
+        .map(({ itemId, quantity }) => {
+          const originalItem = originalTransaction.cart.items.find((i) => i.id === itemId);
+          if (!originalItem || quantity <= 0) return null;
+          const qty = Math.min(quantity, originalItem.quantity);
+          const totalPrice = originalItem.unitPrice * qty - (originalItem.lineDiscount || 0) * (qty / originalItem.quantity);
+          return {
+            id: generateUUID(),
+            productId: originalItem.productId,
+            product: originalItem.product,
+            quantity: qty,
+            unitPrice: originalItem.unitPrice,
+            totalPrice,
+            discount: originalItem.discount,
+            discountType: originalItem.discountType,
+            notes: originalItem.notes,
+            transactionType: originalItem.transactionType,
+            lineDiscount: originalItem.lineDiscount ? (originalItem.lineDiscount * qty) / originalItem.quantity : undefined,
+          } as CartItem;
+        })
+        .filter(Boolean) as CartItem[];
+    } else {
+      throw new Error('Partial refund requires partialItems');
+    }
+
+    const taxRate = (useSettingsStore.getState().globalTaxRate ?? 0.08) as number;
+    const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
+    const discountAmount = items.reduce((sum, i) => sum + (i.discount || 0), 0);
+    const totalWithTax = totalAmount;
+    const subtotal = totalWithTax / (1 + taxRate);
+    const taxAmount = totalWithTax - subtotal;
+
+    const now = new Date();
+    const cart: Cart = {
+      id: generateUUID(),
+      items,
+      subtotal,
+      taxAmount,
+      discountAmount,
+      totalAmount,
+      customerId: originalTransaction.customer?.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const amountReturned = options.amountReturned ?? cart.totalAmount;
+    const refundTransaction: Transaction = {
+      id: generateUUID(),
+      transactionNumber: generateTransactionNumber(),
+      cart,
+      customer: originalTransaction.customer,
+      status: 'completed',
+      cashier: currentUser,
+      createdAt: now,
+      updatedAt: now,
+      documentType: 330,
+      documentProductionDate: now,
+      branchId: originalTransaction.branchId,
+      documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
+      amountTendered: amountReturned,
+      changeAmount: 0,
+      refundOfTransactionId: originalTransaction.id,
+    };
+
+    if (window.electronAPI) {
+      await window.electronAPI.dbSaveTransaction({
+        ...refundTransaction,
+        cart: {
+          ...refundTransaction.cart,
+          items: refundTransaction.cart.items.map((item) => ({
+            ...item,
+            product: {
+              ...item.product,
+              createdAt: item.product.createdAt.toISOString(),
+              updatedAt: item.product.updatedAt.toISOString(),
+            },
+          })),
+          createdAt: refundTransaction.cart.createdAt.toISOString(),
+          updatedAt: refundTransaction.cart.updatedAt.toISOString(),
+        },
+        customer: refundTransaction.customer
+          ? {
+              ...refundTransaction.customer,
+              createdAt: refundTransaction.customer.createdAt.toISOString(),
+              updatedAt: refundTransaction.customer.updatedAt.toISOString(),
+            }
+          : undefined,
+        cashier: {
+          ...refundTransaction.cashier,
+          createdAt: refundTransaction.cashier.createdAt.toISOString(),
+          updatedAt: refundTransaction.cashier.updatedAt.toISOString(),
+        },
+        createdAt: refundTransaction.createdAt.toISOString(),
+        updatedAt: refundTransaction.updatedAt.toISOString(),
+        documentProductionDate: refundTransaction.documentProductionDate.toISOString(),
+      });
+      await window.electronAPI.dbUpdateTransactionStatus(
+        originalTransaction.id,
+        options.fullRefund ? 'refunded' : 'partial_refund'
+      );
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const txDate = new Date(refundTransaction.createdAt);
+    txDate.setHours(0, 0, 0, 0);
+    if (txDate.getTime() === today.getTime()) {
+      set((state) => ({ transactions: [refundTransaction, ...state.transactions] }));
+    }
+    return refundTransaction;
+  },
+
+  updateTransactionStatus: async (transactionId: string, status: Transaction['status']): Promise<void> => {
+    if (window.electronAPI) {
+      const result = await window.electronAPI.dbUpdateTransactionStatus(transactionId, status);
+      if (!result.success) throw new Error(result.error);
+    }
+    set((state) => ({
+      transactions: state.transactions.map((t) =>
+        t.id === transactionId ? { ...t, status, updatedAt: new Date() } : t
+      ),
+    }));
   },
 }));

@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbGetTransactionsByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-transactions-by-date-range', startDate, endDate),
   dbGetTransactionsPage: (options: any) => ipcRenderer.invoke('db-get-transactions-page', options),
   dbSaveTransaction: (transaction: any) => ipcRenderer.invoke('db-save-transaction', transaction),
+  dbUpdateTransactionStatus: (transactionId: string, status: string) => ipcRenderer.invoke('db-update-transaction-status', transactionId, status),
   dbGetBusinessInfo: () => ipcRenderer.invoke('db-get-business-info'),
   dbSaveBusinessInfo: (info: any) => ipcRenderer.invoke('db-save-business-info', info),
   dbGetSoftwareInfo: () => ipcRenderer.invoke('db-get-software-info'),

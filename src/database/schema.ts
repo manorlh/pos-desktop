@@ -57,6 +57,7 @@ export interface TransactionRow {
   whtDeduction: number | null;
   amountTendered: number | null; // Cash amount tendered
   changeAmount: number | null; // Change given
+  refundOfTransactionId: string | null; // When set, this row is a refund document linking to the original transaction
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
 }
@@ -232,6 +233,13 @@ export function createSchema(db: any): void {
       FOREIGN KEY (cashierId) REFERENCES users(id)
     )
   `);
+
+  // Migration: add refundOfTransactionId if not present (existing DBs)
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN refundOfTransactionId TEXT REFERENCES transactions(id)`);
+  } catch (_) {
+    // Column already exists
+  }
 
   // Transaction items table
   db.exec(`
