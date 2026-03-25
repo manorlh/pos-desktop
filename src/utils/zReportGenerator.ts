@@ -13,14 +13,13 @@ export function generateZReport(
   let cashSales = 0;
   let taxCollected = 0;
 
-  // Calculate totals from transactions
-  for (const transaction of transactions) {
-    if (transaction.status === 'completed') {
-      totalSales += transaction.cart.totalAmount;
-      totalItems += transaction.cart.items.reduce((sum, item) => sum + item.quantity, 0);
-      cashSales += transaction.amountTendered || 0;
-      taxCollected += transaction.cart.taxAmount || 0;
-    }
+  const completedTransactions = transactions.filter((t) => t.status === 'completed');
+
+  for (const transaction of completedTransactions) {
+    totalSales += transaction.cart.totalAmount;
+    totalItems += transaction.cart.items.reduce((sum, item) => sum + item.quantity, 0);
+    cashSales += transaction.amountTendered || 0;
+    taxCollected += transaction.cart.taxAmount || 0;
   }
 
   const expectedCash = openingCash + cashSales;
@@ -29,7 +28,7 @@ export function generateZReport(
 
   return {
     totalSales,
-    totalTransactions: transactions.length,
+    totalTransactions: completedTransactions.length,
     totalItems,
     cashSales,
     taxCollected,

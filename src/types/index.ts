@@ -90,7 +90,10 @@ export interface Transaction {
   branchId?: string; // 7 characters, conditional if hasBranches=true
   documentDiscount?: number; // Negative sign for discounts
   whtDeduction?: number; // Positive sign, for receipts only (Withholding Tax)
-  // Cash payment fields (cash-only POS)
+  // Payment: cash and/or Nayax card terminal
+  paymentMethod?: 'cash' | 'card';
+  /** JSON string: vuid + device response subset for audit */
+  nayaxMeta?: string;
   amountTendered?: number; // Cash amount tendered
   changeAmount?: number; // Change given
   // Refund link: when set, this transaction is a refund (credit) document for the original sale

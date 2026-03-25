@@ -61,6 +61,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbSaveSoftwareInfo: (info: any) => ipcRenderer.invoke('db-save-software-info', info),
   dbGetSetting: (key: string) => ipcRenderer.invoke('db-get-setting', key),
   dbSaveSetting: (key: string, value: string) => ipcRenderer.invoke('db-save-setting', key, value),
+
+  nayaxTestConnection: () => ipcRenderer.invoke('nayax-test-connection'),
+  nayaxDoTransaction: (payload: { amountAgorot: number; vuid: string }) =>
+    ipcRenderer.invoke('nayax-do-transaction', payload),
+  nayaxAbortTransaction: (payload: { vuid: string }) =>
+    ipcRenderer.invoke('nayax-abort-transaction', payload),
+
+  dbGetIntegrationLogs: (options: { type?: string; limit?: number; offset?: number }) =>
+    ipcRenderer.invoke('db-get-integration-logs', options),
+  dbClearIntegrationLogs: (type?: string) => ipcRenderer.invoke('db-clear-integration-logs', type),
   
   // Trading day operations
   dbGetCurrentTradingDay: () => ipcRenderer.invoke('db-get-current-trading-day'),

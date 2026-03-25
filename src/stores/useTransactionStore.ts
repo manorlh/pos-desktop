@@ -12,9 +12,60 @@ import { useSettingsStore } from './useSettingsStore';
 //   getTransactionsPage 
 // } from '../database/database';
 
-interface CashPaymentDetails {
-  amountTendered: number;
-  changeAmount: number;
+export type PaymentDetails =
+  | { mode: 'cash'; amountTendered: number; changeAmount: number }
+  | { mode: 'card'; nayaxMeta: string };
+
+function serializeTransactionForDb(transaction: Transaction) {
+  return {
+    ...transaction,
+    cart: {
+      ...transaction.cart,
+      items: transaction.cart.items.map((item) => ({
+        ...item,
+        product: {
+          ...item.product,
+          createdAt: item.product.createdAt.toISOString(),
+          updatedAt: item.product.updatedAt.toISOString(),
+        },
+      })),
+      createdAt: transaction.cart.createdAt.toISOString(),
+      updatedAt: transaction.cart.updatedAt.toISOString(),
+    },
+    customer: transaction.customer
+      ? {
+          ...transaction.customer,
+          createdAt: transaction.customer.createdAt.toISOString(),
+          updatedAt: transaction.customer.updatedAt.toISOString(),
+        }
+      : undefined,
+    cashier: {
+      ...transaction.cashier,
+      createdAt: transaction.cashier.createdAt.toISOString(),
+      updatedAt: transaction.cashier.updatedAt.toISOString(),
+    },
+    createdAt: transaction.createdAt.toISOString(),
+    updatedAt: transaction.updatedAt.toISOString(),
+    documentProductionDate: transaction.documentProductionDate.toISOString(),
+  };
+}
+
+/**
+ * `transaction_items.id` is a global PRIMARY KEY. Cancelled/abandoned card attempts
+ * keep old rows in SQLite; the POS cart still has the same line `CartItem.id`s, so a
+ * retry would violate UNIQUE. Each pending card save gets its own line UUIDs.
+ */
+function cloneCartWithFreshLineItemIds(cart: Cart): Cart {
+  const now = new Date();
+  return {
+    ...cart,
+    id: generateUUID(),
+    items: cart.items.map((item) => ({
+      ...item,
+      id: generateUUID(),
+    })),
+    updatedAt: now,
+  };
 }
 
 interface TransactionStore {
@@ -22,7 +73,7 @@ interface TransactionStore {
   currentUser: User | null;
   addTransaction: (
     cart: Cart, 
-    paymentDetails: CashPaymentDetails, 
+    paymentDetails: PaymentDetails, 
     customer?: Customer
   ) => Promise<Transaction>;
   getTransactionById: (id: string) => Transaction | undefined;
@@ -38,6 +89,9 @@ interface TransactionStore {
     options: { fullRefund: boolean; partialItems?: { itemId: string; quantity: number }[]; amountReturned?: number }
   ) => Promise<Transaction>;
   updateTransactionStatus: (transactionId: string, status: Transaction['status']) => Promise<void>;
+  createPendingCardTransaction: (cart: Cart, customer?: Customer) => Promise<Transaction>;
+  completePendingCardTransaction: (transactionId: string, nayaxMeta: string) => Promise<Transaction>;
+  cancelPendingTransaction: (transactionId: string) => Promise<void>;
 }
 
 export const useTransactionStore = create<TransactionStore>((set, get) => ({
@@ -46,7 +100,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
 
   addTransaction: async (
     cart: Cart,
-    paymentDetails: CashPaymentDetails,
+    paymentDetails: PaymentDetails,
     customer?: Customer
   ): Promise<Transaction> => {
     const { currentUser, generateTransactionNumber } = get();
@@ -79,43 +133,16 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       documentType,
       documentProductionDate: now, // System-determined
       documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
-      // Cash payment fields
-      amountTendered: paymentDetails.amountTendered,
-      changeAmount: paymentDetails.changeAmount,
+      paymentMethod: paymentDetails.mode === 'card' ? 'card' : 'cash',
+      nayaxMeta: paymentDetails.mode === 'card' ? paymentDetails.nayaxMeta : undefined,
+      amountTendered: paymentDetails.mode === 'cash' ? paymentDetails.amountTendered : undefined,
+      changeAmount: paymentDetails.mode === 'cash' ? paymentDetails.changeAmount : undefined,
     };
 
     // Save to database via IPC
     try {
       if (window.electronAPI) {
-        await window.electronAPI.dbSaveTransaction({
-          ...transaction,
-          cart: {
-            ...transaction.cart,
-            items: transaction.cart.items.map(item => ({
-              ...item,
-              product: {
-                ...item.product,
-                createdAt: item.product.createdAt.toISOString(),
-                updatedAt: item.product.updatedAt.toISOString(),
-              },
-            })),
-            createdAt: transaction.cart.createdAt.toISOString(),
-            updatedAt: transaction.cart.updatedAt.toISOString(),
-          },
-          customer: transaction.customer ? {
-            ...transaction.customer,
-            createdAt: transaction.customer.createdAt.toISOString(),
-            updatedAt: transaction.customer.updatedAt.toISOString(),
-          } : undefined,
-          cashier: {
-            ...transaction.cashier,
-            createdAt: transaction.cashier.createdAt.toISOString(),
-            updatedAt: transaction.cashier.updatedAt.toISOString(),
-          },
-          createdAt: transaction.createdAt.toISOString(),
-          updatedAt: transaction.updatedAt.toISOString(),
-          documentProductionDate: transaction.documentProductionDate.toISOString(),
-        });
+        await window.electronAPI.dbSaveTransaction(serializeTransactionForDb(transaction));
       }
     } catch (error) {
       console.error('Failed to save transaction to database:', error);
@@ -134,6 +161,102 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     }
 
     return transaction;
+  },
+
+  createPendingCardTransaction: async (cart: Cart, customer?: Customer): Promise<Transaction> => {
+    const { currentUser, generateTransactionNumber } = get();
+
+    if (!currentUser) {
+      throw new Error('No user logged in');
+    }
+
+    const { isDayOpen } = useTradingDayStore.getState();
+    if (!isDayOpen) {
+      throw new Error('Cannot process transaction: Day is closed');
+    }
+
+    const now = new Date();
+    const documentType = customer ? 305 : 400;
+    const cartForSave = cloneCartWithFreshLineItemIds(cart);
+
+    const transaction: Transaction = {
+      id: generateUUID(),
+      transactionNumber: generateTransactionNumber(),
+      cart: cartForSave,
+      customer,
+      status: 'pending',
+      cashier: currentUser,
+      createdAt: now,
+      updatedAt: now,
+      documentType,
+      documentProductionDate: now,
+      documentDiscount: cartForSave.discountAmount > 0 ? cartForSave.discountAmount : undefined,
+      paymentMethod: 'card',
+    };
+
+    if (!window.electronAPI) {
+      throw new Error('Database not available');
+    }
+    const saveResult = await window.electronAPI.dbSaveTransaction(serializeTransactionForDb(transaction));
+    if (!saveResult.success) {
+      throw new Error(saveResult.error || 'Failed to save pending transaction');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const transactionDate = new Date(transaction.createdAt);
+    transactionDate.setHours(0, 0, 0, 0);
+    if (transactionDate.getTime() === today.getTime()) {
+      set((state) => ({
+        transactions: [transaction, ...state.transactions],
+      }));
+    }
+
+    return transaction;
+  },
+
+  completePendingCardTransaction: async (
+    transactionId: string,
+    nayaxMeta: string
+  ): Promise<Transaction> => {
+    const existing = get().getTransactionById(transactionId);
+    if (!existing) {
+      throw new Error('Transaction not found');
+    }
+    if (existing.status !== 'pending') {
+      throw new Error('Transaction is not pending');
+    }
+
+    const now = new Date();
+    const completed: Transaction = {
+      ...existing,
+      status: 'completed',
+      nayaxMeta,
+      paymentMethod: 'card',
+      updatedAt: now,
+    };
+
+    if (!window.electronAPI) {
+      throw new Error('Database not available');
+    }
+    const saveResult = await window.electronAPI.dbSaveTransaction(serializeTransactionForDb(completed));
+    if (!saveResult.success) {
+      throw new Error(saveResult.error || 'Failed to complete transaction');
+    }
+
+    set((state) => ({
+      transactions: state.transactions.map((t) => (t.id === transactionId ? completed : t)),
+    }));
+
+    return completed;
+  },
+
+  cancelPendingTransaction: async (transactionId: string): Promise<void> => {
+    const t = get().getTransactionById(transactionId);
+    if (!t || t.status !== 'pending') {
+      return;
+    }
+    await get().updateTransactionStatus(transactionId, 'cancelled');
   },
 
   getTransactionById: (id: string) => {
@@ -208,6 +331,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
           refundOfTransactionId: tx.refundOfTransactionId,
+          paymentMethod: tx.paymentMethod,
+          nayaxMeta: tx.nayaxMeta,
         }));
       } else {
         // Fallback to in-memory
@@ -308,6 +433,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
           refundOfTransactionId: tx.refundOfTransactionId,
+          paymentMethod: tx.paymentMethod,
+          nayaxMeta: tx.nayaxMeta,
         }));
         
         return { transactions, total: result.total };
@@ -378,6 +505,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           amountTendered: tx.amountTendered,
           changeAmount: tx.changeAmount,
           refundOfTransactionId: tx.refundOfTransactionId,
+          paymentMethod: tx.paymentMethod,
+          nayaxMeta: tx.nayaxMeta,
         }));
         set({ transactions });
       } else {
@@ -466,6 +595,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       documentProductionDate: now,
       branchId: originalTransaction.branchId,
       documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
+      paymentMethod: 'cash',
       amountTendered: amountReturned,
       changeAmount: 0,
       refundOfTransactionId: originalTransaction.id,

@@ -31,6 +31,54 @@ interface TaxReportResult {
   error?: string;
 }
 
+type NayaxTestConnectionResult =
+  | { ok: true; result: unknown }
+  | { ok: false; error: string; code?: number; data?: unknown };
+
+type NayaxDoTransactionOutcome =
+  | 'approved'
+  | 'partial'
+  | 'declined'
+  | 'cancelled'
+  | 'rpc_error'
+  | 'network_error'
+  | 'unknown';
+
+type NayaxDoTransactionResult =
+  | {
+      approved: true;
+      outcome: 'approved' | 'partial';
+      vuid: string;
+      result?: unknown;
+      statusCode?: number;
+      statusMessage?: string;
+      message?: string;
+    }
+  | {
+      approved: false;
+      outcome: NayaxDoTransactionOutcome;
+      vuid: string;
+      error?: string;
+      result?: unknown;
+      statusCode?: number;
+      statusMessage?: string;
+    };
+
+/** Abort is optimistic: IPC returns immediately; JSON-RPC runs in the main-process background. */
+type NayaxAbortTransactionResult =
+  | { ok: true; dispatched: true }
+  | { ok: false; error: string; statusCode?: number };
+
+interface IntegrationLogRow {
+  id: string;
+  type: string;
+  method: string;
+  requestJson: string;
+  responseJson: string | null;
+  outcome: string;
+  createdAt: string;
+}
+
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
@@ -72,6 +120,17 @@ interface ElectronAPI {
   dbSaveSoftwareInfo: (info: any) => Promise<{ success: boolean; error?: string }>;
   dbGetSetting: (key: string) => Promise<string | null>;
   dbSaveSetting: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
+
+  nayaxTestConnection: () => Promise<NayaxTestConnectionResult>;
+  nayaxDoTransaction: (payload: { amountAgorot: number; vuid: string }) => Promise<NayaxDoTransactionResult>;
+  nayaxAbortTransaction: (payload: { vuid: string }) => Promise<NayaxAbortTransactionResult>;
+
+  dbGetIntegrationLogs: (options: {
+    type?: string;
+    limit?: number;
+    offset?: number;
+  }) => Promise<{ logs: IntegrationLogRow[]; total: number }>;
+  dbClearIntegrationLogs: (type?: string) => Promise<{ success: boolean; error?: string }>;
   
   // Trading day operations
   dbGetCurrentTradingDay: () => Promise<any | null>;

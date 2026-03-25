@@ -294,6 +294,8 @@ function loadTransactionWithRelations(db: any, row: TransactionRow): Transaction
     amountTendered: row.amountTendered || undefined,
     changeAmount: row.changeAmount || undefined,
     refundOfTransactionId: row.refundOfTransactionId || undefined,
+    paymentMethod: (row.paymentMethod as 'cash' | 'card' | undefined) || undefined,
+    nayaxMeta: row.nayaxMeta || undefined,
   };
 }
 
@@ -303,8 +305,8 @@ export function saveTransaction(db: any, transaction: Transaction): void {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -320,9 +322,11 @@ export function saveTransaction(db: any, transaction: Transaction): void {
       transaction.branchId || null,
       transaction.documentDiscount || null,
       transaction.whtDeduction || null,
-      transaction.amountTendered || null,
-      transaction.changeAmount || null,
+      transaction.amountTendered ?? null,
+      transaction.changeAmount ?? null,
       transaction.refundOfTransactionId || null,
+      transaction.paymentMethod || null,
+      transaction.nayaxMeta || null,
       transaction.createdAt.toISOString(),
       transaction.updatedAt.toISOString()
     );

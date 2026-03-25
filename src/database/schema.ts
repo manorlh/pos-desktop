@@ -58,6 +58,8 @@ export interface TransactionRow {
   amountTendered: number | null; // Cash amount tendered
   changeAmount: number | null; // Change given
   refundOfTransactionId: string | null; // When set, this row is a refund document linking to the original transaction
+  paymentMethod: string | null; // 'cash' | 'card'
+  nayaxMeta: string | null; // JSON
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
 }
@@ -241,6 +243,18 @@ export function createSchema(db: any): void {
     // Column already exists
   }
 
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN paymentMethod TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN nayaxMeta TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
   // Transaction items table
   db.exec(`
     CREATE TABLE IF NOT EXISTS transaction_items (
@@ -265,6 +279,18 @@ export function createSchema(db: any): void {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS integration_logs (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      method TEXT NOT NULL,
+      requestJson TEXT NOT NULL,
+      responseJson TEXT,
+      outcome TEXT NOT NULL,
+      createdAt TEXT NOT NULL
     )
   `);
 
@@ -332,6 +358,7 @@ export function createSchema(db: any): void {
     CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
     CREATE INDEX IF NOT EXISTS idx_trading_days_dayDate ON trading_days(dayDate);
     CREATE INDEX IF NOT EXISTS idx_trading_days_status ON trading_days(status);
+    CREATE INDEX IF NOT EXISTS idx_integration_logs_type_created ON integration_logs(type, createdAt DESC);
   `);
 }
 

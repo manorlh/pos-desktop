@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -11,20 +11,79 @@ import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useProductStore } from '@/stores/useProductStore';
 import { useI18n } from '@/i18n';
 
+const NAYAX_INTEGRATION_LOG_TYPE = 'nayax_card_integration';
+
 export function SettingsPage() {
   const [dbPath, setDbPath] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
-  const { virtualKeyboardEnabled, globalTaxRate, hideOutOfStockProducts, language, loadSettings, setVirtualKeyboardEnabled, setGlobalTaxRate, setHideOutOfStockProducts, setLanguage } = useSettingsStore();
+  const {
+    virtualKeyboardEnabled,
+    globalTaxRate,
+    hideOutOfStockProducts,
+    language,
+    nayaxEnabled,
+    nayaxDeviceHost,
+    nayaxDevicePort,
+    nayaxSpicyPath,
+    loadSettings,
+    setVirtualKeyboardEnabled,
+    setGlobalTaxRate,
+    setHideOutOfStockProducts,
+    setLanguage,
+    setNayaxEnabled,
+    setNayaxDeviceHost,
+    setNayaxDevicePort,
+    setNayaxSpicyPath,
+  } = useSettingsStore();
   const { filterProducts } = useProductStore();
-  const { t, setLanguage: setI18nLanguage } = useI18n();
+  const { t, setLanguage: setI18nLanguage, locale } = useI18n();
   const [taxRateInput, setTaxRateInput] = useState<string>('');
+  const [nayaxHostInput, setNayaxHostInput] = useState('');
+  const [nayaxPortInput, setNayaxPortInput] = useState('');
+  const [nayaxPathInput, setNayaxPathInput] = useState('');
+  const [isTestingNayax, setIsTestingNayax] = useState(false);
+  const [nayaxResult, setNayaxResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [integrationLogs, setIntegrationLogs] = useState<
+    Array<{
+      id: string;
+      type: string;
+      method: string;
+      requestJson: string;
+      responseJson: string | null;
+      outcome: string;
+      createdAt: string;
+    }>
+  >([]);
+  const [integrationLogsTotal, setIntegrationLogsTotal] = useState(0);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 
   useEffect(() => {
     loadDatabasePath();
     loadSettings();
+  }, []);
+
+  const loadIntegrationLogs = async () => {
+    if (!window.electronAPI?.dbGetIntegrationLogs) return;
+    setIsLoadingLogs(true);
+    try {
+      const r = await window.electronAPI.dbGetIntegrationLogs({
+        type: NAYAX_INTEGRATION_LOG_TYPE,
+        limit: 100,
+      });
+      setIntegrationLogs(r.logs);
+      setIntegrationLogsTotal(r.total);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadIntegrationLogs();
   }, []);
 
   useEffect(() => {
@@ -34,8 +93,52 @@ export function SettingsPage() {
     }
   }, [globalTaxRate]);
 
+  useEffect(() => {
+    setNayaxHostInput(nayaxDeviceHost);
+    setNayaxPortInput(nayaxDevicePort);
+    setNayaxPathInput(nayaxSpicyPath);
+  }, [nayaxDeviceHost, nayaxDevicePort, nayaxSpicyPath]);
+
   const handleTaxRateChange = (value: string) => {
     setTaxRateInput(value);
+  };
+
+  const persistNayaxConnection = async () => {
+    await setNayaxDeviceHost(nayaxHostInput.trim());
+    await setNayaxDevicePort(nayaxPortInput.trim() || '8080');
+    await setNayaxSpicyPath(nayaxPathInput.trim() || '/SPICy');
+  };
+
+  const handleSaveNayaxConnection = async () => {
+    setNayaxResult(null);
+    await persistNayaxConnection();
+    setNayaxResult({ success: true, message: t('settings.saved') });
+  };
+
+  const handleNayaxTest = async () => {
+    setNayaxResult(null);
+    setIsTestingNayax(true);
+    try {
+      await persistNayaxConnection();
+      if (!window.electronAPI?.nayaxTestConnection) {
+        setNayaxResult({ success: false, message: t('settings.nayaxTestFailed') });
+        return;
+      }
+      const res = await window.electronAPI.nayaxTestConnection();
+      if (res.ok) {
+        setNayaxResult({ success: true, message: t('settings.nayaxTestOk') });
+      } else {
+        setNayaxResult({
+          success: false,
+          message: `${t('settings.nayaxTestFailed')} ${'error' in res ? res.error : ''}`.trim(),
+        });
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setNayaxResult({ success: false, message: msg });
+    } finally {
+      setIsTestingNayax(false);
+    }
   };
 
   const handleSaveTaxRate = async () => {
@@ -279,6 +382,159 @@ export function SettingsPage() {
               {t('settings.taxIncludeNote')}
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            {t('settings.nayaxTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.nayaxDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="nayax-enabled" className="text-base">
+                {t('settings.nayaxEnable')}
+              </Label>
+            </div>
+            <Switch
+              id="nayax-enabled"
+              checked={nayaxEnabled}
+              onCheckedChange={setNayaxEnabled}
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="nayax-host">{t('settings.nayaxHost')}</Label>
+              <Input
+                id="nayax-host"
+                value={nayaxHostInput}
+                onChange={(e) => setNayaxHostInput(e.target.value)}
+                placeholder={t('settings.nayaxHostPlaceholder')}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nayax-port">{t('settings.nayaxPort')}</Label>
+              <Input
+                id="nayax-port"
+                value={nayaxPortInput}
+                onChange={(e) => setNayaxPortInput(e.target.value)}
+                placeholder="8080"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nayax-path">{t('settings.nayaxPath')}</Label>
+              <Input
+                id="nayax-path"
+                value={nayaxPathInput}
+                onChange={(e) => setNayaxPathInput(e.target.value)}
+                placeholder={t('settings.nayaxPathPlaceholder')}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          {nayaxResult && (
+            <Alert variant={nayaxResult.success ? 'default' : 'destructive'}>
+              {nayaxResult.success ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4" />
+              )}
+              <AlertDescription>{nayaxResult.message}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={handleSaveNayaxConnection}>
+              {t('settings.nayaxSaveConnection')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleNayaxTest}
+              disabled={isTestingNayax || !nayaxHostInput.trim()}
+            >
+              {isTestingNayax ? t('settings.nayaxTesting') : t('settings.nayaxTestDevice')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            {t('settings.integrationLogsTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.integrationLogsDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void loadIntegrationLogs()}
+              disabled={isLoadingLogs}
+            >
+              {isLoadingLogs ? '…' : t('settings.integrationLogsRefresh')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!window.confirm(t('settings.integrationLogsClear') + '?')) return;
+                const r = await window.electronAPI?.dbClearIntegrationLogs(NAYAX_INTEGRATION_LOG_TYPE);
+                if (r?.success) await loadIntegrationLogs();
+              }}
+            >
+              {t('settings.integrationLogsClear')}
+            </Button>
+          </div>
+          {integrationLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('settings.integrationLogsEmpty')}</p>
+          ) : (
+            <div className="max-h-[420px] overflow-y-auto space-y-2 border rounded-md p-2">
+              {integrationLogs.map((log) => (
+                <details key={log.id} className="border-b border-border/60 pb-2 last:border-0">
+                  <summary className="cursor-pointer text-sm font-medium list-none flex flex-wrap gap-x-3 gap-y-1">
+                    <span className="text-muted-foreground">
+                      {new Date(log.createdAt).toLocaleString(locale)}
+                    </span>
+                    <span>{log.method}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{log.outcome}</span>
+                  </summary>
+                  <div className="mt-2 space-y-2 text-xs">
+                    <div>
+                      <div className="font-semibold mb-0.5">{t('settings.integrationLogsRequest')}</div>
+                      <pre className="whitespace-pre-wrap break-all rounded bg-muted/50 p-2 max-h-40 overflow-y-auto">
+                        {log.requestJson}
+                      </pre>
+                    </div>
+                    <div>
+                      <div className="font-semibold mb-0.5">{t('settings.integrationLogsResponse')}</div>
+                      <pre className="whitespace-pre-wrap break-all rounded bg-muted/50 p-2 max-h-48 overflow-y-auto">
+                        {log.responseJson ?? '—'}
+                      </pre>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+          {integrationLogsTotal > integrationLogs.length ? (
+            <p className="text-xs text-muted-foreground">
+              {integrationLogs.length} / {integrationLogsTotal}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

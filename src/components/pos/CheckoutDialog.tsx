@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { DollarSign, Check, X, ArrowLeft, Delete } from 'lucide-react';
+import { DollarSign, Check, X, Delete, CreditCard } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useProductStore } from '@/stores/useProductStore';
 import { useTradingDayStore } from '@/stores/useTradingDayStore';
+import { useSettingsStore } from '@/stores/useSettingsStore';
 import { 
   Dialog, 
   DialogContent, 
@@ -16,6 +17,7 @@ import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
 import { formatCurrency } from '@/lib/utils';
 import { useI18n } from '@/i18n';
+import type { CartItem } from '@/types';
 
 interface CheckoutDialogProps {
   open: boolean;
@@ -27,17 +29,51 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [showKeyboard, setShowKeyboard] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<'cash' | 'card'>('cash');
+  const [lastChangeAmount, setLastChangeAmount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** Pending card sale id (transaction id = Nayax vuid); cleared after complete/cancel */
+  const pendingCardTransactionIdRef = useRef<string | null>(null);
   
   const { cart, clearCart } = useCartStore();
-  const { addTransaction } = useTransactionStore();
+  const {
+    addTransaction,
+    createPendingCardTransaction,
+    completePendingCardTransaction,
+    cancelPendingTransaction,
+  } = useTransactionStore();
   const { loadProducts } = useProductStore();
   const { isDayOpen } = useTradingDayStore();
+  const { loadSettings } = useSettingsStore();
   const { t, locale } = useI18n();
   const [error, setError] = useState<string | null>(null);
+  /** Set after pending row exists; used for Nayax abort + cancel button visibility */
+  const [activeCardVuid, setActiveCardVuid] = useState<string | null>(null);
+
+  const canUseCardPayment =
+    typeof window !== 'undefined' &&
+    Boolean(window.electronAPI?.nayaxDoTransaction);
+  const canAbortCardPayment =
+    typeof window !== 'undefined' &&
+    Boolean(window.electronAPI?.nayaxAbortTransaction);
 
   const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount);
-  const canComplete = parseFloat(amountTendered || '0') >= cart.totalAmount;
+  const canCompleteCash = parseFloat(amountTendered || '0') >= cart.totalAmount;
+  const amountAgorot = Math.round(cart.totalAmount * 100);
+  const canCompleteCard =
+    isDayOpen && amountAgorot >= 1 && cart.totalAmount > 0;
+
+  useEffect(() => {
+    if (!canUseCardPayment && paymentMode === 'card') {
+      setPaymentMode('cash');
+    }
+  }, [canUseCardPayment, paymentMode]);
+
+  useEffect(() => {
+    if (open) {
+      void loadSettings();
+    }
+  }, [open, loadSettings]);
 
   // Auto-open keyboard when dialog opens
   useEffect(() => {
@@ -79,7 +115,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   ];
 
   const handleCompleteTransaction = async () => {
-    if (!canComplete) return;
+    if (!canCompleteCash) return;
 
     if (!isDayOpen) {
       setError(t('tradingDay.cannotProcessTransaction'));
@@ -92,29 +128,136 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     try {
       const amountTenderedNum = parseFloat(amountTendered);
       
+      setLastChangeAmount(changeAmount);
       await addTransaction(cart, {
+        mode: 'cash',
         amountTendered: amountTenderedNum,
         changeAmount: changeAmount,
       });
       
-      // Reload products to reflect updated stock quantities
       await loadProducts();
       
       setIsComplete(true);
       
-      // Simulate processing time
       setTimeout(() => {
         clearCart();
         setIsComplete(false);
         setAmountTendered('');
         setError(null);
+        setPaymentMode('cash');
+        setLastChangeAmount(0);
         onOpenChange(false);
       }, 2000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Transaction failed:', error);
-      setError(error.message || t('tradingDay.cannotProcessTransaction'));
+      const msg = error instanceof Error ? error.message : t('tradingDay.cannotProcessTransaction');
+      setError(msg);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const cancelPendingCardIfAny = async () => {
+    const id = pendingCardTransactionIdRef.current;
+    if (!id) return;
+    pendingCardTransactionIdRef.current = null;
+    try {
+      await cancelPendingTransaction(id);
+    } catch (e) {
+      console.error('cancelPendingCardIfAny:', e);
+    }
+  };
+
+  const handleAbortCardPayment = () => {
+    const vuid = activeCardVuid || pendingCardTransactionIdRef.current;
+    if (!vuid || !window.electronAPI?.nayaxAbortTransaction) return;
+    void window.electronAPI.nayaxAbortTransaction({ vuid }).catch((e) => {
+      console.error('nayaxAbortTransaction:', e);
+    });
+  };
+
+  const handleCompleteCard = async () => {
+    if (!canCompleteCard) return;
+
+    if (!window.electronAPI?.nayaxDoTransaction) {
+      setError(t('checkout.nayaxNotConfigured'));
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    let pendingId: string | null = null;
+    let approvalSucceeded = false;
+
+    try {
+      const pending = await createPendingCardTransaction(cart);
+      pendingId = pending.id;
+      pendingCardTransactionIdRef.current = pending.id;
+      setActiveCardVuid(pending.id);
+
+      const res = await window.electronAPI.nayaxDoTransaction({
+        amountAgorot,
+        vuid: pending.id,
+      });
+
+      if (!res.approved) {
+        pendingCardTransactionIdRef.current = null;
+        await cancelPendingTransaction(pending.id);
+        pendingId = null;
+
+        let msg = res.statusMessage || res.error || t('checkout.nayaxDeclined');
+        if (res.outcome === 'cancelled') {
+          msg = res.statusMessage || res.error || t('checkout.nayaxCancelled');
+        } else if (res.outcome === 'network_error') {
+          msg = res.error || t('checkout.nayaxNetworkError');
+        }
+        setError(msg);
+        return;
+      }
+
+      approvalSucceeded = true;
+
+      const nayaxMeta = JSON.stringify({
+        vuid: res.vuid,
+        result: res.result,
+        outcome: res.outcome,
+        statusCode: res.statusCode,
+      });
+      setLastChangeAmount(0);
+      await completePendingCardTransaction(pending.id, nayaxMeta);
+
+      pendingCardTransactionIdRef.current = null;
+      pendingId = null;
+
+      await loadProducts();
+      setIsComplete(true);
+
+      setTimeout(() => {
+        clearCart();
+        setIsComplete(false);
+        setError(null);
+        setPaymentMode('cash');
+        setLastChangeAmount(0);
+        onOpenChange(false);
+      }, 2000);
+    } catch (error: unknown) {
+      console.error('Card transaction failed:', error);
+      if (pendingId && !approvalSucceeded) {
+        pendingCardTransactionIdRef.current = null;
+        try {
+          await cancelPendingTransaction(pendingId);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        pendingCardTransactionIdRef.current = null;
+      }
+      const msg = error instanceof Error ? error.message : t('checkout.nayaxDeclined');
+      setError(msg);
+    } finally {
+      setIsProcessing(false);
+      setActiveCardVuid(null);
     }
   };
 
@@ -123,10 +266,14 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     setIsComplete(false);
     setIsProcessing(false);
     setError(null);
+    setPaymentMode('cash');
+    setLastChangeAmount(0);
+    setActiveCardVuid(null);
   };
 
   const handleClose = (open: boolean) => {
     if (!open) {
+      void cancelPendingCardIfAny();
       resetDialog();
     }
     onOpenChange(open);
@@ -143,10 +290,10 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
             <DialogTitle className="text-xl mb-2">{t('checkout.transactionComplete')}</DialogTitle>
             <DialogDescription>
               {t('checkout.processing')}
-              {changeAmount > 0 && (
+              {lastChangeAmount > 0 && (
                 <div className="mt-4 p-4 bg-muted rounded-lg">
                   <div className="text-lg font-bold">
-                    {t('checkout.changeDue')}: {formatCurrency(changeAmount, locale)}
+                    {t('checkout.changeDue')}: {formatCurrency(lastChangeAmount, locale)}
                   </div>
                 </div>
               )}
@@ -162,9 +309,6 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
       <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 !overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
           <DialogTitle className="text-2xl">{t('checkout.title')}</DialogTitle>
-          {/* <DialogDescription className="text-base">
-            {t('checkout.cashPayment')}
-          </DialogDescription> */}
         </DialogHeader>
 
         <div className="grid grid-cols-[1.2fr_1fr] gap-6 p-6 flex-1 min-h-0 overflow-hidden">
@@ -174,7 +318,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
               <CardContent className="p-4 flex flex-col flex-1 min-h-0">
                 <h3 className="font-semibold text-lg mb-4 flex-shrink-0">{t('pos.currentSale')}</h3>
                 <div className="space-y-2 mb-4 flex-1 overflow-y-auto min-h-0">
-                  {cart.items.map((item) => (
+                  {cart.items.map((item: CartItem) => (
                     <div key={item.id} className="flex justify-between items-center text-sm py-1 border-b border-border/50 last:border-0 flex-shrink-0">
                       <div className="flex-1">
                         <span className="font-medium">{item.product.name}</span>
@@ -213,10 +357,43 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
           <div className="flex flex-col min-h-0">
             <Card className="flex-1 flex flex-col min-h-0">
               <CardContent className="p-4 flex flex-col flex-1 min-h-0">
-                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2 flex-shrink-0">
-                  <DollarSign className="h-5 w-5 text-primary" />
-                  {t('checkout.cashPayment')}
+                <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 flex-shrink-0">
+                  {paymentMode === 'card' ? (
+                    <CreditCard className="h-5 w-5 text-primary" />
+                  ) : (
+                    <DollarSign className="h-5 w-5 text-primary" />
+                  )}
+                  {t('checkout.paymentMethod')}: {paymentMode === 'card' ? t('checkout.card') : t('checkout.cash')}
                 </h3>
+
+                {canUseCardPayment && (
+                  <div className="flex gap-2 mb-4 flex-shrink-0" role="tablist" aria-label={t('checkout.paymentMethod')}>
+                    <Button
+                      type="button"
+                      variant={paymentMode === 'cash' ? 'default' : 'outline'}
+                      className="flex-1 h-12 text-base"
+                      onClick={() => {
+                        setPaymentMode('cash');
+                        setError(null);
+                      }}
+                    >
+                      <DollarSign className="mr-2 h-5 w-5 shrink-0" />
+                      {t('checkout.cash')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={paymentMode === 'card' ? 'default' : 'outline'}
+                      className="flex-1 h-12 text-base"
+                      onClick={() => {
+                        setPaymentMode('card');
+                        setError(null);
+                      }}
+                    >
+                      <CreditCard className="mr-2 h-5 w-5 shrink-0" />
+                      {t('checkout.card')}
+                    </Button>
+                  </div>
+                )}
                 
                 {/* Total Amount Display */}
                 <div className="mb-4 p-4 bg-primary/10 rounded-lg border border-primary/20 flex-shrink-0">
@@ -224,6 +401,8 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                   <div className="text-2xl font-bold text-primary">{formatCurrency(cart.totalAmount, locale)}</div>
                 </div>
 
+                {paymentMode === 'cash' && (
+                  <>
                 {/* Amount Input and Quick Buttons Row */}
                 <div className="mb-4 flex-shrink-0">
                   <label className="text-sm font-medium mb-2 block">{t('checkout.amountTendered')}</label>
@@ -330,7 +509,6 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                       </div>
                     )}
                     
-                    {/* Insufficient Amount Warning */}
                     {error && (
                       <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
                         {error}
@@ -349,11 +527,10 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                       </div>
                     )}
 
-                    {/* Complete Button */}
                     <Button 
                       className="w-full h-14 text-lg font-bold flex-shrink-0 mt-auto" 
                       size="lg"
-                      disabled={!canComplete || isProcessing}
+                      disabled={!canCompleteCash || isProcessing}
                       onClick={handleCompleteTransaction}
                     >
                       {isProcessing ? (
@@ -370,6 +547,64 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                     </Button>
                   </div>
                 </div>
+                  </>
+                )}
+
+                {paymentMode === 'card' && (
+                  <div className="flex flex-col flex-1 min-h-0">
+                    <p className="text-sm text-muted-foreground mb-4 flex-shrink-0">
+                      {t('checkout.cardPaymentHint')}
+                    </p>
+                    {amountAgorot < 1 && (
+                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
+                        {t('errors.invalidNumber')}
+                      </div>
+                    )}
+                    {error && (
+                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
+                        {error}
+                      </div>
+                    )}
+                    {!isDayOpen && (
+                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
+                        {t('tradingDay.cannotProcessTransaction')}
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-3 mt-auto w-full flex-shrink-0">
+                      <Button
+                        className="w-full h-14 text-lg font-bold"
+                        size="lg"
+                        disabled={!canCompleteCard || isProcessing}
+                        onClick={handleCompleteCard}
+                      >
+                        {isProcessing ? (
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            {t('checkout.waitingForCard')}
+                          </div>
+                        ) : (
+                          <>
+                            <CreditCard className="mr-2 h-5 w-5" />
+                            {t('checkout.payWithCard')}
+                          </>
+                        )}
+                      </Button>
+                      {canAbortCardPayment &&
+                        isProcessing &&
+                        activeCardVuid &&
+                        canCompleteCard && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full h-12 text-base border-destructive/50 text-destructive hover:bg-destructive/10"
+                            onClick={handleAbortCardPayment}
+                          >
+                            {t('checkout.cancelCardPayment')}
+                          </Button>
+                        )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

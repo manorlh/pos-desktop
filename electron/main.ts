@@ -3,6 +3,23 @@ const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const iconv = require('iconv-lite');
+const crypto = require('crypto');
+
+import {
+  callNayaxJsonRpc,
+  validateNayaxHost,
+  parseNayaxPort,
+  normalizeNayaxPath,
+  DEFAULT_NAYAX_TRANSACTION_TIMEOUT_MS,
+  DEFAULT_NAYAX_TEST_TIMEOUT_MS,
+  DEFAULT_NAYAX_ABORT_RPC_TIMEOUT_MS,
+  type NayaxJsonRpcResult,
+} from './nayaxClient';
+import {
+  parseAshraitDoTransactionResult,
+  parseAbortTransactionResult,
+  INTEGRATION_LOG_TYPE_NAYAX,
+} from './nayaxOutcome';
 
 const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
@@ -193,6 +210,18 @@ function createSchema(db: any): void {
     // Column already exists
   }
 
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN paymentMethod TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN nayaxMeta TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
   // Transaction items table
   db.exec(`
     CREATE TABLE IF NOT EXISTS transaction_items (
@@ -217,6 +246,19 @@ function createSchema(db: any): void {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    )
+  `);
+
+  // Integration logs (e.g. Nayax JSON-RPC request/response audit)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS integration_logs (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      method TEXT NOT NULL,
+      requestJson TEXT NOT NULL,
+      responseJson TEXT,
+      outcome TEXT NOT NULL,
+      createdAt TEXT NOT NULL
     )
   `);
 
@@ -284,6 +326,7 @@ function createSchema(db: any): void {
     CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
     CREATE INDEX IF NOT EXISTS idx_trading_days_dayDate ON trading_days(dayDate);
     CREATE INDEX IF NOT EXISTS idx_trading_days_status ON trading_days(status);
+    CREATE INDEX IF NOT EXISTS idx_integration_logs_type_created ON integration_logs(type, createdAt DESC);
   `);
 }
 
@@ -546,6 +589,8 @@ function loadTransactionWithRelations(db: any, row: any): any {
     amountTendered: row.amountTendered || undefined,
     changeAmount: row.changeAmount || undefined,
     refundOfTransactionId: row.refundOfTransactionId || undefined,
+    paymentMethod: row.paymentMethod || undefined,
+    nayaxMeta: row.nayaxMeta || undefined,
   };
 }
 
@@ -646,8 +691,8 @@ function saveTransaction(db: any, transaction: any): void {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -663,9 +708,11 @@ function saveTransaction(db: any, transaction: any): void {
       transaction.branchId || null,
       transaction.documentDiscount || null,
       transaction.whtDeduction || null,
-      transaction.amountTendered || null,
-      transaction.changeAmount || null,
+      transaction.amountTendered ?? null,
+      transaction.changeAmount ?? null,
       transaction.refundOfTransactionId || null,
+      transaction.paymentMethod || null,
+      transaction.nayaxMeta || null,
       transaction.createdAt,
       transaction.updatedAt
     );
@@ -811,6 +858,164 @@ function getSetting(db: any, key: string): string | null {
 function setSetting(db: any, key: string, value: string): void {
   const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
   stmt.run(key, value);
+}
+
+/** randomUUID exists from Node 15.6+; older Electron runtimes need randomBytes. */
+function newIntegrationLogId(): string {
+  const c = crypto as typeof import('crypto');
+  if (typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  const buf = c.randomBytes(16);
+  buf[6] = (buf[6]! & 0x0f) | 0x40;
+  buf[8] = (buf[8]! & 0x3f) | 0x80;
+  const hex = buf.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function insertIntegrationLog(
+  db: any,
+  entry: {
+    type: string;
+    method: string;
+    requestJson: string;
+    responseJson: string | null;
+    outcome: string;
+  }
+): void {
+  const id = newIntegrationLogId();
+  const createdAt = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO integration_logs (id, type, method, requestJson, responseJson, outcome, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    entry.type,
+    entry.method,
+    entry.requestJson,
+    entry.responseJson,
+    entry.outcome,
+    createdAt
+  );
+  console.log(
+    `[integration_logs] type=${entry.type} method=${entry.method} outcome=${entry.outcome}`
+  );
+}
+
+/** Fire-and-forget: abort RPC runs after tick; IPC returns immediately. */
+function scheduleNayaxAbortTransactionOptimistic(
+  db: any,
+  conn: { host: string; port: number; path: string },
+  vuid: string
+): void {
+  setImmediate(() => {
+    void runNayaxAbortTransactionBackground(db, conn, vuid).catch((err) =>
+      console.error('nayax abort (background):', err)
+    );
+  });
+}
+
+async function runNayaxAbortTransactionBackground(
+  db: any,
+  conn: { host: string; port: number; path: string },
+  vuid: string
+): Promise<void> {
+  const services = ['ashrait', 'engine'] as const;
+  let rpcResult: NayaxJsonRpcResult | null = null;
+  let parsed: ReturnType<typeof parseAbortTransactionResult> | null = null;
+  let usedService: string | null = null;
+
+  for (const service of services) {
+    const params = [service, { vuid }];
+    const attemptId = `${vuid}-abort-${service}`;
+    rpcResult = await callNayaxJsonRpc({
+      host: conn.host,
+      port: conn.port,
+      path: conn.path,
+      method: 'abortTransaction',
+      params,
+      id: attemptId,
+      timeoutMs: DEFAULT_NAYAX_ABORT_RPC_TIMEOUT_MS,
+    });
+    parsed = parseAbortTransactionResult(rpcResult);
+    if (parsed.ok) {
+      usedService = service;
+      break;
+    }
+  }
+
+  const requestPayload = {
+    endpoint: {
+      host: conn.host,
+      port: conn.port,
+      path: normalizeNayaxPath(conn.path),
+    },
+    triedServices: services,
+    usedService,
+    optimisticBackground: true,
+    jsonrpc: { method: 'abortTransaction', vuid },
+  };
+  const responseForLog =
+    rpcResult && rpcResult.ok === true
+      ? { ok: true as const, result: rpcResult.result, id: rpcResult.id }
+      : rpcResult
+        ? {
+            ok: false as const,
+            error: rpcResult.error,
+            code: rpcResult.code,
+            data: rpcResult.data,
+          }
+        : { ok: false as const, error: 'No abort attempt' };
+  if (!parsed) {
+    console.error('abortTransaction background: no parsed result');
+    return;
+  }
+  try {
+    insertIntegrationLog(db, {
+      type: INTEGRATION_LOG_TYPE_NAYAX,
+      method: 'abortTransaction',
+      requestJson: JSON.stringify(requestPayload),
+      responseJson: JSON.stringify(responseForLog),
+      outcome: parsed.ok ? 'success' : 'error',
+    });
+  } catch (logErr) {
+    console.error('insertIntegrationLog (abortTransaction background):', logErr);
+  }
+}
+
+function getIntegrationLogs(
+  db: any,
+  options: { type?: string; limit?: number; offset?: number }
+): { logs: any[]; total: number } {
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+  const offset = Math.max(options.offset ?? 0, 0);
+  const type = options.type;
+  let where = '1=1';
+  const params: any[] = [];
+  if (type) {
+    where = 'type = ?';
+    params.push(type);
+  }
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) as c FROM integration_logs WHERE ${where}`)
+    .get(...params) as { c: number };
+  const rows = db
+    .prepare(
+      `SELECT id, type, method, requestJson, responseJson, outcome, createdAt
+       FROM integration_logs WHERE ${where}
+       ORDER BY datetime(createdAt) DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, limit, offset);
+  return { logs: rows, total: totalRow.c };
+}
+
+function clearIntegrationLogs(db: any, type?: string): void {
+  if (type) {
+    db.prepare('DELETE FROM integration_logs WHERE type = ?').run(type);
+  } else {
+    db.prepare('DELETE FROM integration_logs').run();
+  }
 }
 
 // Trading day functions
@@ -1980,6 +2185,320 @@ ipcMain.handle('db-save-setting', async (event, key: string, value: string) => {
     }
     console.error('Error saving setting:', error);
     return { success: false, error: error.message };
+  }
+});
+
+function getNayaxConnectionFromDb(db: any): { host: string; port: number; path: string } | { error: string } {
+  const hostRaw = getSetting(db, 'nayaxDeviceHost');
+  const host = typeof hostRaw === 'string' ? hostRaw.trim() : '';
+  if (!host) {
+    return { error: 'Nayax device host is not configured' };
+  }
+  if (!validateNayaxHost(host)) {
+    return { error: 'Invalid Nayax device host' };
+  }
+  const port = parseNayaxPort(getSetting(db, 'nayaxDevicePort'));
+  const pathStr = normalizeNayaxPath(getSetting(db, 'nayaxSpicyPath'));
+  return { host, port, path: pathStr };
+}
+
+ipcMain.handle('nayax-test-connection', async () => {
+  try {
+    const db = getDatabaseMain();
+    const conn = getNayaxConnectionFromDb(db);
+    if ('error' in conn) {
+      return { ok: false as const, error: conn.error };
+    }
+    const requestPayload = {
+      endpoint: {
+        host: conn.host,
+        port: conn.port,
+        path: normalizeNayaxPath(conn.path),
+      },
+      jsonrpc: { method: 'getInfo', params: ['device'] },
+    };
+    const result = await callNayaxJsonRpc({
+      host: conn.host,
+      port: conn.port,
+      path: conn.path,
+      method: 'getInfo',
+      params: ['device'],
+      id: `test-${Date.now()}`,
+      timeoutMs: DEFAULT_NAYAX_TEST_TIMEOUT_MS,
+    });
+    const responsePayload = result.ok
+      ? { ok: true as const, result: result.result }
+      : {
+          ok: false as const,
+          error: result.error,
+          code: result.code,
+          data: result.data,
+        };
+    try {
+      insertIntegrationLog(db, {
+        type: INTEGRATION_LOG_TYPE_NAYAX,
+        method: 'getInfo',
+        requestJson: JSON.stringify(requestPayload),
+        responseJson: JSON.stringify(responsePayload),
+        outcome: result.ok ? 'success' : 'error',
+      });
+    } catch (logErr) {
+      console.error('insertIntegrationLog (getInfo):', logErr);
+    }
+    if (result.ok) {
+      return { ok: true as const, result: result.result };
+    }
+    return { ok: false as const, error: result.error, code: result.code, data: result.data };
+  } catch (error: any) {
+    if (error.message === 'Database not initialized') {
+      return { ok: false as const, error: 'Database not initialized' };
+    }
+    return { ok: false as const, error: error.message || 'Unknown error' };
+  }
+});
+
+ipcMain.handle(
+  'nayax-do-transaction',
+  async (
+    _event: unknown,
+    payload: { amountAgorot: number; vuid: string }
+  ) => {
+    const db = getDatabaseMain();
+    try {
+      const conn = getNayaxConnectionFromDb(db);
+      if ('error' in conn) {
+        try {
+          insertIntegrationLog(db, {
+            type: INTEGRATION_LOG_TYPE_NAYAX,
+            method: 'doTransaction',
+            requestJson: JSON.stringify({ stage: 'precondition', error: conn.error }),
+            responseJson: null,
+            outcome: 'error',
+          });
+        } catch (_) {
+          /* ignore log failure */
+        }
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: conn.error,
+        };
+      }
+      const amountAgorot = Math.round(payload.amountAgorot);
+      if (!Number.isFinite(amountAgorot) || amountAgorot < 1) {
+        try {
+          insertIntegrationLog(db, {
+            type: INTEGRATION_LOG_TYPE_NAYAX,
+            method: 'doTransaction',
+            requestJson: JSON.stringify({ stage: 'precondition', amountAgorot: payload.amountAgorot }),
+            responseJson: null,
+            outcome: 'error',
+          });
+        } catch (_) {
+          /* ignore */
+        }
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: 'Invalid transaction amount',
+        };
+      }
+      const vuidRaw = typeof payload.vuid === 'string' ? payload.vuid.trim() : '';
+      if (!vuidRaw) {
+        try {
+          insertIntegrationLog(db, {
+            type: INTEGRATION_LOG_TYPE_NAYAX,
+            method: 'doTransaction',
+            requestJson: JSON.stringify({ stage: 'precondition', error: 'Missing vuid' }),
+            responseJson: null,
+            outcome: 'error',
+          });
+        } catch (_) {
+          /* ignore */
+        }
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: 'vuid is required (use pending transaction id)',
+        };
+      }
+      const vuid = vuidRaw;
+      const params = [
+        'ashrait',
+        {
+          vuid,
+          tranType: 1,
+          tranCode: 1,
+          creditTerms: 1,
+          amount: amountAgorot,
+          currency: '376',
+        },
+      ];
+      const requestPayload = {
+        endpoint: {
+          host: conn.host,
+          port: conn.port,
+          path: normalizeNayaxPath(conn.path),
+        },
+        jsonrpc: { method: 'doTransaction', params, id: vuid },
+      };
+      const rpcResult = await callNayaxJsonRpc({
+        host: conn.host,
+        port: conn.port,
+        path: conn.path,
+        method: 'doTransaction',
+        params,
+        id: vuid,
+        timeoutMs: DEFAULT_NAYAX_TRANSACTION_TIMEOUT_MS,
+      });
+      const responseForLog =
+        rpcResult.ok === true
+          ? { ok: true as const, result: rpcResult.result, id: rpcResult.id }
+          : {
+              ok: false as const,
+              error: rpcResult.error,
+              code: rpcResult.code,
+              data: rpcResult.data,
+            };
+      const parsed = parseAshraitDoTransactionResult(rpcResult);
+      try {
+        insertIntegrationLog(db, {
+          type: INTEGRATION_LOG_TYPE_NAYAX,
+          method: 'doTransaction',
+          requestJson: JSON.stringify(requestPayload),
+          responseJson: JSON.stringify(responseForLog),
+          outcome: parsed.outcome,
+        });
+      } catch (logErr) {
+        console.error('insertIntegrationLog (doTransaction):', logErr);
+      }
+      if (parsed.approved) {
+        return {
+          approved: true,
+          outcome: parsed.outcome,
+          vuid,
+          result: rpcResult.ok ? rpcResult.result : undefined,
+          statusCode: parsed.statusCode,
+          statusMessage: parsed.statusMessage,
+          message: parsed.message,
+        };
+      }
+      return {
+        approved: false,
+        outcome: parsed.outcome,
+        vuid,
+        error: parsed.message,
+        statusCode: parsed.statusCode,
+        statusMessage: parsed.statusMessage,
+        result: rpcResult.ok ? rpcResult.result : undefined,
+      };
+    } catch (error: any) {
+      if (error.message === 'Database not initialized') {
+        return { approved: false, outcome: 'declined' as const, vuid: '', error: 'Database not initialized' };
+      }
+      try {
+        insertIntegrationLog(db, {
+          type: INTEGRATION_LOG_TYPE_NAYAX,
+          method: 'doTransaction',
+          requestJson: JSON.stringify({ stage: 'exception' }),
+          responseJson: JSON.stringify({ error: error.message }),
+          outcome: 'error',
+        });
+      } catch (_) {
+        /* ignore */
+      }
+      return {
+        approved: false,
+        outcome: 'declined' as const,
+        vuid: '',
+        error: error.message || 'Unknown error',
+      };
+    }
+  }
+);
+
+ipcMain.handle(
+  'nayax-abort-transaction',
+  async (_event: unknown, payload: { vuid: string }) => {
+    const db = getDatabaseMain();
+    try {
+      const conn = getNayaxConnectionFromDb(db);
+      if ('error' in conn) {
+        try {
+          insertIntegrationLog(db, {
+            type: INTEGRATION_LOG_TYPE_NAYAX,
+            method: 'abortTransaction',
+            requestJson: JSON.stringify({ stage: 'precondition', error: conn.error }),
+            responseJson: null,
+            outcome: 'error',
+          });
+        } catch (_) {
+          /* ignore */
+        }
+        return { ok: false as const, error: conn.error };
+      }
+      const vuidRaw = typeof payload.vuid === 'string' ? payload.vuid.trim() : '';
+      if (!vuidRaw) {
+        try {
+          insertIntegrationLog(db, {
+            type: INTEGRATION_LOG_TYPE_NAYAX,
+            method: 'abortTransaction',
+            requestJson: JSON.stringify({ stage: 'precondition', error: 'Missing vuid' }),
+            responseJson: null,
+            outcome: 'error',
+          });
+        } catch (_) {
+          /* ignore */
+        }
+        return { ok: false as const, error: 'vuid is required' };
+      }
+      const vuid = vuidRaw;
+      scheduleNayaxAbortTransactionOptimistic(db, conn, vuid);
+      return { ok: true as const, dispatched: true };
+    } catch (error: any) {
+      if (error.message === 'Database not initialized') {
+        return { ok: false as const, error: 'Database not initialized' };
+      }
+      try {
+        insertIntegrationLog(db, {
+          type: INTEGRATION_LOG_TYPE_NAYAX,
+          method: 'abortTransaction',
+          requestJson: JSON.stringify({ stage: 'exception' }),
+          responseJson: JSON.stringify({ error: error.message }),
+          outcome: 'error',
+        });
+      } catch (_) {
+        /* ignore */
+      }
+      return { ok: false as const, error: error.message || 'Unknown error' };
+    }
+  }
+);
+
+ipcMain.handle(
+  'db-get-integration-logs',
+  async (_e: unknown, options: { type?: string; limit?: number; offset?: number }) => {
+    try {
+      const db = getDatabaseMain();
+      return getIntegrationLogs(db, options || {});
+    } catch (error: any) {
+      console.error('db-get-integration-logs:', error);
+      return { logs: [], total: 0 };
+    }
+  }
+);
+
+ipcMain.handle('db-clear-integration-logs', async (_e: unknown, type?: string) => {
+  try {
+    const db = getDatabaseMain();
+    clearIntegrationLogs(db, type);
+    return { success: true as const };
+  } catch (error: any) {
+    console.error('db-clear-integration-logs:', error);
+    return { success: false as const, error: error.message };
   }
 });
 

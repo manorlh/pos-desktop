@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "electron": "wait-on tcp:5173 && cross-env IS_DEV=true electron .",
+    "electron": "wait-on tcp:5173 && cross-env IS_DEV=true electron --inspect .",
     "electron:pack": "electron-builder",
     "electron:dev": "concurrently \"npm run dev\" \"npm run electron\"",
     "electron:build": "npm run build && electron-builder --win",
