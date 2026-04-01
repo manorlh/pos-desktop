@@ -14,6 +14,9 @@
     "electron:build": "npm run build && electron-builder --win",
     "dist": "npm run build && electron-builder --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "mock:openformat": "node scripts/mock-openformat.js",
     "build:windows": "echo '⚠️  Windows builds must be done on Windows or via GitHub Actions. Push to GitHub and use the Actions tab to build, or run this on a Windows machine: npm run electron:build'",
     "postinstall": "node scripts/postinstall.js",
     "postinstall:windows": "electron-builder install-app-deps"
@@ -32,6 +35,7 @@
     "clsx": "^2.0.0",
     "iconv-lite": "^0.7.0",
     "lucide-react": "^0.294.0",
+    "mqtt": "^4.3.7",
     "node-printer": "^1.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -62,6 +66,7 @@
     "vite": "^5.0.0",
     "vite-plugin-electron": "^0.15.5",
     "vite-plugin-electron-renderer": "^0.14.5",
+    "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },
   "build": {
@@ -117,7 +122,9 @@
         {
           "from": "node_modules/better-sqlite3",
           "to": "better-sqlite3",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         }
       ]
     },

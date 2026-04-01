@@ -84,6 +84,7 @@ interface TransactionStore {
   setCurrentUser: (user: User) => void;
   generateTransactionNumber: () => string;
   loadTodaysTransactions: () => Promise<void>;
+  deleteAllTransactions: () => Promise<{ success: boolean; deleted?: number; error?: string }>;
   createRefundTransaction: (
     originalTransaction: Transaction,
     options: { fullRefund: boolean; partialItems?: { itemId: string; quantity: number }[]; amountReturned?: number }
@@ -117,8 +118,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
 
     const now = new Date();
     
-    // Determine document type: 305 for invoice (with customer), 400 for receipt (no customer)
-    const documentType = customer ? 305 : 400;
+    // 320 = חשבונית מס/קבלה (tax invoice/receipt): POS sales always have items + payment
+    const documentType = 320;
 
     const transaction: Transaction = {
       id: generateUUID(),
@@ -176,7 +177,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     }
 
     const now = new Date();
-    const documentType = customer ? 305 : 400;
+    const documentType = 320;
     const cartForSave = cloneCartWithFreshLineItemIds(cart);
 
     const transaction: Transaction = {
@@ -461,6 +462,17 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     return `POS${year}${month}${day}${timestamp}`;
   },
 
+  deleteAllTransactions: async () => {
+    if (!window.electronAPI?.dbDeleteAllTransactions) {
+      return { success: false, error: 'Not available' };
+    }
+    const result = await window.electronAPI.dbDeleteAllTransactions();
+    if (result.success) {
+      set({ transactions: [] });
+    }
+    return result;
+  },
+
   loadTodaysTransactions: async () => {
     try {
       if (window.electronAPI) {
@@ -561,7 +573,7 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       throw new Error('Partial refund requires partialItems');
     }
 
-    const taxRate = (useSettingsStore.getState().globalTaxRate ?? 0.08) as number;
+    const taxRate = (useSettingsStore.getState().globalTaxRate ?? 0.18) as number;
     const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
     const discountAmount = items.reduce((sum, i) => sum + (i.discount || 0), 0);
     const totalWithTax = totalAmount;

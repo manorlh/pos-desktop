@@ -85,7 +85,7 @@ export interface Transaction {
   createdAt: Date;
   updatedAt: Date;
   // Tax Authority fields
-  documentType: number; // 305 for invoice, 400 for receipt
+  documentType: number; // 320 = tax invoice/receipt, 330 = credit note (refund)
   documentProductionDate: Date; // System-determined, cannot be changed
   branchId?: string; // 7 characters, conditional if hasBranches=true
   documentDiscount?: number; // Negative sign for discounts

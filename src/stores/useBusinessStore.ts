@@ -16,7 +16,9 @@ export interface BusinessInfo {
   companyAddressNumber: string;
   companyCity: string;
   companyZip: string;
-  companyRegNumber?: string; // Company registry number
+  companyRegNumber?: string; // Company registry number (ח.פ.)
+  /** מספר תיק ניכויים — INI A000 field 1016 (9 digits) */
+  withholdingFileNumber?: string;
   hasBranches: boolean;
   branchId?: string; // 7 characters, if hasBranches is true
 }

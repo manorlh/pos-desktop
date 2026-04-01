@@ -249,7 +249,7 @@ function loadTransactionWithRelations(db: any, row: TransactionRow): Transaction
   // All prices are tax-inclusive, so we need to extract tax from them
   // Get global tax rate from settings
   const taxRateStr = getSetting(db, 'globalTaxRate');
-  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.08; // Default to 8% if not set
+  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.18; // Israel standard VAT 18%
   
   // Total with tax (all prices are tax-inclusive)
   const totalWithTax = items.reduce((sum, item) => sum + item.totalPrice, 0);

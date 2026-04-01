@@ -299,6 +299,17 @@ export const en = {
     noDbPathSpecified: 'No database path specified',
     backupCreatedAt: 'Backup created successfully at: {{path}}',
     failedToCreateBackup: 'Failed to create backup',
+    resetTransactionsSection: 'Transaction history',
+    resetTransactionsDesc:
+      'Permanently delete all sales records from the database. Products, customers, and settings are not affected.',
+    resetTransactionsButton: 'Delete all transactions',
+    resetTransactionsTitle: 'Delete all transactions?',
+    resetTransactionsMessage:
+      'This cannot be undone. All transaction history will be removed from this database.',
+    resetTransactionsConfirm: 'Delete all',
+    resetTransactionsSuccess: 'All transactions were deleted.',
+    resetTransactionsFailed: 'Could not delete transactions.',
+    resetTransactionsDeleting: 'Deleting…',
     nayaxTitle: 'Nayax card terminal',
     nayaxDesc: 'Connect to a Nayax device on your network for credit card payments (JSON-RPC on port 8080 by default).',
     nayaxEnable: 'Enable card payments',

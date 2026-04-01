@@ -5,6 +5,8 @@ const archiver = require('archiver');
 const iconv = require('iconv-lite');
 const crypto = require('crypto');
 
+import { syncService } from './syncService';
+
 import {
   callNayaxJsonRpc,
   validateNayaxHost,
@@ -20,6 +22,16 @@ import {
   parseAbortTransactionResult,
   INTEGRATION_LOG_TYPE_NAYAX,
 } from './nayaxOutcome';
+import { normalizeIsraeli9Digit } from '../src/utils/israeliTaxId';
+import {
+  formatOpenFormatLinkId,
+  buildB110Record,
+  buildM100Record,
+  buildC100Record,
+  buildD110Record,
+  buildD120Record,
+  collectUniqueProductsForM100,
+} from '../src/utils/taxReportGenerator';
 
 const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
@@ -350,7 +362,8 @@ function initializeDatabaseMain(dbPath: string): any {
   dbInstance.pragma('foreign_keys = ON');
   
   createSchema(dbInstance);
-  
+  syncService.init(dbInstance);
+
   return dbInstance;
 }
 
@@ -544,7 +557,7 @@ function loadTransactionWithRelations(db: any, row: any): any {
   // All prices are tax-inclusive, so we need to extract tax from them
   // Get global tax rate from settings
   const taxRateStr = getSetting(db, 'globalTaxRate');
-  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.08; // Default to 8% if not set
+  const taxRate = taxRateStr ? parseFloat(taxRateStr) / 100 : 0.18; // Israel standard VAT 18%
   
   // Total with tax (all prices are tax-inclusive)
   const totalWithTax = items.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
@@ -1504,7 +1517,7 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     // Use provided globalTaxRate or get from settings
     const taxRate = globalTaxRate || (() => {
       const taxRateStr = getSetting(db, 'globalTaxRate');
-      return taxRateStr ? parseFloat(taxRateStr) : 8; // Default to 8% if not set
+      return taxRateStr ? parseFloat(taxRateStr) : 18; // Israel standard VAT 18%
     })();
     
     // Import the tax report generator (we'll need to adapt it for Node.js)
@@ -1561,24 +1574,14 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     const padLeft = (str: string, len: number, pad = '0') => {
       return (str || '').padStart(len, pad).substring(0, len);
     };
-    
-    const formatAmount = (value: number, len = 15) => {
-      const absValue = Math.abs(value);
-      const integerPart = Math.floor(absValue);
-      const decimalPart = Math.round((absValue - integerPart) * 100);
-      const integerStr = padLeft(integerPart.toString(), 12, '0');
-      const decimalStr = padLeft(decimalPart.toString(), 2, '0');
-      const sign = value < 0 ? '-' : '+';
-      return integerStr + decimalStr + sign;
-    };
-    
+
     const formatDate = (date: Date) => {
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
       return `${year}${month}${day}`;
     };
-    
+
     const formatTime = (date: Date) => {
       const hours = String(date.getHours()).padStart(2, '0');
       const minutes = String(date.getMinutes()).padStart(2, '0');
@@ -1590,133 +1593,108 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     let recordNumber = 1;
     const recordCounts: Record<string, number> = {
       A100: 0,
+      B110: 0,
       C100: 0,
       D110: 0,
       D120: 0,
+      M100: 0,
       Z900: 0,
     };
-    
+
+    const vatNorm = normalizeIsraeli9Digit(String(businessInfo.vatNumber ?? ''));
+
+    const totalSales = transactions.reduce((s: number, t: any) => {
+      if (t.status === 'cancelled') return s;
+      return s + Math.abs(Number(t.cart?.totalAmount ?? 0));
+    }, 0);
+
     // A100 - Opening record
     let a100 = 'A100';
     a100 += padLeft(recordNumber.toString(), 9, '0');
-    a100 += padLeft(businessInfo.vatNumber, 9, '0');
+    a100 += padLeft(vatNorm, 9, '0');
     a100 += padLeft(uniqueId, 15, '0');
     a100 += '&OF1.31&';
     a100 += padRight('', 50);
     bkmvLines.push(a100);
     recordCounts.A100 = 1;
     recordNumber++;
-    
+
+    bkmvLines.push(
+      buildB110Record(vatNorm, recordNumber, businessInfo, { periodSalesTotal: totalSales })
+    );
+    recordCounts.B110 = 1;
+    recordNumber++;
+
     // Map transactions by id for refund→original lookup
     const txById = new Map<string, any>(transactions.map((t: any) => [t.id, t]));
 
+    let documentLinkSeq = 0;
+
     // Process transactions (sales and refunds)
     for (const transaction of transactions) {
+      documentLinkSeq += 1;
+      const linkId7 = formatOpenFormatLinkId(documentLinkSeq);
       const isRefund = Boolean(transaction.refundOfTransactionId);
       const originalTx = isRefund ? txById.get(transaction.refundOfTransactionId) : null;
-      // Refund document type 330 (Credit Tax Invoice); sales use 305/400
-      const docType = isRefund ? 330 : transaction.documentType;
-      const docProductionDate = transaction.documentProductionDate
-        ? new Date(transaction.documentProductionDate)
-        : new Date(transaction.createdAt);
+      // POS sales always use 320 (tax invoice/receipt) — type 400 does NOT support D110 item lines.
+      // Refunds use 330 (credit note).
+      const docType = isRefund ? 330 : 320;
 
-      // C100 - Document header
-      let c100 = 'C100';
-      c100 += padLeft(recordNumber.toString(), 9, '0');
-      c100 += padLeft(businessInfo.vatNumber, 9, '0');
-      c100 += padRight('', 9);
-      c100 += padLeft(String(docType), 3, '0');
-      c100 += padRight(transaction.transactionNumber, 20);
-      c100 += formatDate(docProductionDate);
-      c100 += padRight('', 250);
-      c100 += transaction.documentDiscount ? formatAmount(-Math.abs(transaction.documentDiscount), 15) : padRight('', 15);
-      c100 += padRight('', 45);
-      c100 += transaction.whtDeduction ? formatAmount(Math.abs(transaction.whtDeduction), 12) : padRight('', 12);
-      c100 += padRight('', 26);
-      c100 += formatDate(transaction.createdAt);
-      c100 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
-      c100 += isRefund ? '0' : '0'; // Field 1228 Document Cancelled: 0 for normal refunds/sales
-      c100 += padRight('', 444 - c100.length);
-      bkmvLines.push(c100);
+      bkmvLines.push(
+        buildC100Record(transaction, String(businessInfo.vatNumber ?? ''), recordNumber, linkId7, {
+          docType,
+          globalTaxRate: taxRate,
+        })
+      );
       recordCounts.C100++;
       recordNumber++;
 
-      // D110 - Document details (for refunds: link to base document via 1256, 1257, 1274)
       let lineNum = 1;
-      const baseDocType = originalTx ? String(originalTx.documentType) : '';
-      const baseDocNumber = originalTx ? originalTx.transactionNumber : '';
-      const baseDocBranchId = originalTx?.branchId ? padRight(originalTx.branchId, 7).slice(0, 7) : '';
       for (const item of transaction.cart.items) {
-        let d110 = 'D110';
-        d110 += padLeft(recordNumber.toString(), 9, '0');
-        d110 += padLeft(businessInfo.vatNumber, 9, '0');
-        d110 += padRight('', 9);
-        d110 += padLeft(String(docType), 3, '0');
-        d110 += padRight(transaction.transactionNumber, 20);
-        d110 += padLeft(lineNum.toString(), 4, '0');
-        d110 += padRight(baseDocType, 3).slice(0, 3);
-        d110 += padRight(baseDocNumber, 20).slice(0, 20);
-        d110 += String(item.transactionType ?? 2).slice(0, 1);
-        d110 += padRight(item.product?.sku ?? '', 20).slice(0, 20);
-        d110 += padRight(item.product?.name ?? '', 30).slice(0, 30);
-        d110 += padRight('', 50);
-        d110 += padRight('', 30);
-        d110 += padRight('', 20);
-        const qtyInteger = Math.floor(item.quantity);
-        const qtyDecimal = Math.round((item.quantity - qtyInteger) * 10000);
-        d110 += padLeft(qtyInteger.toString(), 12, '0') + padLeft(qtyDecimal.toString(), 4, '0') + '+';
-        d110 += formatAmount(item.unitPrice, 15);
-        d110 += item.lineDiscount ? formatAmount(-Math.abs(item.lineDiscount), 15) : padRight('', 15);
-        d110 += formatAmount(item.totalPrice, 15);
-        const vatPercent = Math.round(taxRate);
-        d110 += padLeft(vatPercent.toString(), 2, '0');
-        d110 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
-        d110 += formatDate(transaction.createdAt);
-        d110 += padRight('', 339 - d110.length);
-        bkmvLines.push(d110);
+        bkmvLines.push(
+          buildD110Record(
+            transaction,
+            item,
+            lineNum,
+            String(businessInfo.vatNumber ?? ''),
+            recordNumber,
+            taxRate,
+            linkId7,
+            {
+              docType,
+              baseDocType: originalTx ? padLeft(String(originalTx.documentType), 3, '0') : undefined,
+              baseDocNumber: originalTx?.transactionNumber,
+              baseBranchId: originalTx?.branchId
+                ? padRight(String(originalTx.branchId), 7).slice(0, 7)
+                : undefined,
+            }
+          )
+        );
         recordCounts.D110++;
         recordNumber++;
         lineNum++;
       }
 
-      // D120 - Payment details (cash-only: type 1, amount = amountTendered or cart.totalAmount)
-      const paymentAmount =
-        transaction.amountTendered != null
-          ? Number(transaction.amountTendered)
-          : (transaction.cart?.totalAmount ?? 0);
-      const paymentType = 1; // 1 = cash (app is cash-only)
-
-      let d120 = 'D120';
-      d120 += padLeft(recordNumber.toString(), 9, '0');
-      d120 += padLeft(businessInfo.vatNumber, 9, '0');
-      d120 += padRight('', 9);
-      d120 += padLeft(String(docType), 3, '0');
-      d120 += padRight(transaction.transactionNumber, 20);
-      d120 += padLeft('1', 4, '0');
-      d120 += String(paymentType);
-      d120 += padRight('', 10);
-      d120 += padRight('', 10);
-      d120 += padRight('', 15);
-      d120 += padRight('', 10);
-      d120 += padRight('', 8);
-      d120 += formatAmount(paymentAmount, 15);
-      d120 += padRight('', 1);
-      d120 += padRight('', 20);
-      d120 += padRight('', 1);
-      d120 += (transaction.branchId ? padRight(transaction.branchId, 7) : padRight('', 7)).slice(0, 7);
-      d120 += formatDate(transaction.createdAt);
-      d120 += padRight('', 7);
-      d120 += padRight('', 222 - d120.length);
-      bkmvLines.push(d120);
+      bkmvLines.push(
+        buildD120Record(transaction, 1, String(businessInfo.vatNumber ?? ''), recordNumber, linkId7, {
+          docType,
+        })
+      );
       recordCounts.D120++;
       recordNumber++;
     }
-    
+
+    for (const p of collectUniqueProductsForM100(transactions)) {
+      bkmvLines.push(buildM100Record(vatNorm, recordNumber, p));
+      recordCounts.M100++;
+      recordNumber++;
+    }
+
     // Z900 - Closing record
     const totalRecords = recordNumber;
     let z900 = 'Z900';
     z900 += padLeft(recordNumber.toString(), 9, '0');
-    z900 += padLeft(businessInfo.vatNumber, 9, '0');
+    z900 += padLeft(vatNorm, 9, '0');
     z900 += padLeft(uniqueId, 15, '0');
     z900 += '&OF1.31&';
     z900 += padLeft(totalRecords.toString(), 15, '0');
@@ -1752,20 +1730,21 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     let a000 = 'A000';
     a000 += padRight('', 5);
     a000 += padLeft(totalRecords.toString(), 15, '0');
-    a000 += padLeft(businessInfo.vatNumber, 9, '0');
+    a000 += padLeft(normalizeIsraeli9Digit(String(businessInfo.vatNumber ?? '')), 9, '0');
     a000 += padLeft(uniqueId, 15, '0');
     a000 += padRight(taxReportConfig.systemCode, 8);
     a000 += padLeft(softwareInfo.registrationNumber, 8, '0');
     a000 += padRight(softwareInfo.name, 20);
     a000 += padRight(softwareInfo.version, 20);
-    a000 += padLeft(softwareInfo.manufacturerId, 9, '0');
+    a000 += padLeft(normalizeIsraeli9Digit(String(softwareInfo.manufacturerId ?? '')), 9, '0');
     a000 += padRight(softwareInfo.manufacturerName, 20);
     a000 += softwareInfo.softwareType === 'single-year' ? '1' : '2';
     a000 += padRight(path.join(businessDir, path.basename(finalDir)), 50);
     a000 += taxReportConfig.accountingType;
     a000 += taxReportConfig.balancingRequired ? '1' : '0';
-    a000 += padLeft(businessInfo.vatNumber, 9, '0');
-    a000 += padLeft(businessInfo.companyRegNumber || '000000001', 9, '0');
+    a000 += padLeft(normalizeIsraeli9Digit(String(businessInfo.companyRegNumber || '00000001')), 9, '0');
+    a000 += padLeft(normalizeIsraeli9Digit(String(businessInfo.withholdingFileNumber || '00000000')), 9, '0');
+    a000 += padRight('', 10);
     a000 += padRight(businessInfo.companyName, 50);
     a000 += padRight(businessInfo.companyAddress, 50);
     a000 += padRight(businessInfo.companyAddressNumber, 10);
@@ -1775,11 +1754,14 @@ ipcMain.handle('generate-tax-report', async (event, options) => {
     if ('year' in dateRange) {
       a000 += String(dateRange.year);
       a000 += String(dateRange.year) + '0101';
-      a000 += String(dateRange.year) + '1231';
+      const yearEnd = new Date(dateRange.year, 11, 31);
+      const endCap = yearEnd > processDate ? processDate : yearEnd;
+      a000 += formatDate(endCap);
     } else {
       a000 += String(dateRange.start.getFullYear());
       a000 += formatDate(dateRange.start);
-      a000 += formatDate(dateRange.end);
+      const end = dateRange.end > processDate ? processDate : dateRange.end;
+      a000 += formatDate(end);
     }
     
     a000 += formatDate(processDate);
@@ -2083,6 +2065,18 @@ ipcMain.handle('db-get-transactions-page', async (event, options: any) => {
   } catch (error: any) {
     console.error('Error getting transactions page:', error);
     return { transactions: [], total: 0 };
+  }
+});
+
+ipcMain.handle('db-delete-all-transactions', async () => {
+  try {
+    const db = getDatabaseMain();
+    db.prepare('UPDATE transactions SET refundOfTransactionId = NULL WHERE refundOfTransactionId IS NOT NULL').run();
+    const info = db.prepare('DELETE FROM transactions').run();
+    return { success: true, deleted: info.changes };
+  } catch (error: any) {
+    console.error('Error deleting all transactions:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -2551,6 +2545,64 @@ ipcMain.handle('db-close-trading-day', async (event, id: string, data: any) => {
     return { success: true };
   } catch (error: any) {
     console.error('Error closing trading day:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ── Cloud Sync IPC handlers ───────────────────────────────────────────────────
+
+ipcMain.handle('sync-connect', async (_event, config: any) => {
+  try {
+    syncService.connect(config);
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] sync-connect error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-disconnect', async () => {
+  try {
+    syncService.disconnect();
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] sync-disconnect error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-get-status', async () => {
+  try {
+    return { success: true, status: syncService.getStatus() };
+  } catch (error: any) {
+    console.error('[IPC] sync-get-status error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-enqueue', async (_event, data: {
+  entityType: 'product' | 'category';
+  entityId: string;
+  action: 'create' | 'update' | 'delete';
+  payload: Record<string, unknown> | null;
+  cloudId: string | null;
+  updatedAt: string;
+}) => {
+  try {
+    syncService.enqueue(data.entityType, data.entityId, data.action, data.payload, data.cloudId, data.updatedAt);
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] sync-enqueue error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-flush-queue', async () => {
+  try {
+    syncService.flushQueue();
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] sync-flush-queue error:', error);
     return { success: false, error: error.message };
   }
 });

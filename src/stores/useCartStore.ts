@@ -149,7 +149,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
 
   calculateTotals: () => {
     const { cart } = get();
-    const taxRate = useSettingsStore.getState().globalTaxRate || 0.08; // Default to 8% if not loaded
+    const taxRate = useSettingsStore.getState().globalTaxRate || 0.18; // Israel standard VAT 18%
     
     // All product prices are tax-inclusive
     // We need to extract the tax amount from the prices

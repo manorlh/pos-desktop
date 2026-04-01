@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbGetTodaysTransactions: () => ipcRenderer.invoke('db-get-todays-transactions'),
   dbGetTransactionsByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-transactions-by-date-range', startDate, endDate),
   dbGetTransactionsPage: (options: any) => ipcRenderer.invoke('db-get-transactions-page', options),
+  dbDeleteAllTransactions: () => ipcRenderer.invoke('db-delete-all-transactions'),
   dbSaveTransaction: (transaction: any) => ipcRenderer.invoke('db-save-transaction', transaction),
   dbUpdateTransactionStatus: (transactionId: string, status: string) => ipcRenderer.invoke('db-update-transaction-status', transactionId, status),
   dbGetBusinessInfo: () => ipcRenderer.invoke('db-get-business-info'),
@@ -85,6 +86,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMainProcessMessage: (callback: (message: string) => void) => {
     ipcRenderer.on('main-process-message', (event, message) => callback(message));
   },
+
+  // Cloud sync
+  syncConnect: (config: any) => ipcRenderer.invoke('sync-connect', config),
+  syncDisconnect: () => ipcRenderer.invoke('sync-disconnect'),
+  syncGetStatus: () => ipcRenderer.invoke('sync-get-status'),
+  syncEnqueue: (data: any) => ipcRenderer.invoke('sync-enqueue', data),
+  syncFlushQueue: () => ipcRenderer.invoke('sync-flush-queue'),
 });
 
 // Remove listeners on window unload

@@ -50,7 +50,7 @@ export interface TransactionRow {
   receiptUrl: string | null;
   notes: string | null;
   cashierId: string;
-  documentType: number; // 305 for invoice, 400 for receipt
+  documentType: number; // 320 = tax invoice/receipt, 330 = credit note
   documentProductionDate: string; // ISO string
   branchId: string | null;
   documentDiscount: number | null;

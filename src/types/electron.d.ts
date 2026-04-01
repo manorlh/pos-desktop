@@ -112,6 +112,7 @@ interface ElectronAPI {
   dbGetTodaysTransactions: () => Promise<any[]>;
   dbGetTransactionsByDateRange: (startDate: string, endDate: string) => Promise<any[]>;
   dbGetTransactionsPage: (options: { startDate?: string; endDate?: string; limit?: number; offset?: number; status?: string }) => Promise<{ transactions: any[]; total: number }>;
+  dbDeleteAllTransactions: () => Promise<{ success: boolean; deleted?: number; error?: string }>;
   dbSaveTransaction: (transaction: any) => Promise<{ success: boolean; error?: string }>;
   dbUpdateTransactionStatus: (transactionId: string, status: string) => Promise<{ success: boolean; error?: string }>;
   dbGetBusinessInfo: () => Promise<any | null>;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -9,6 +9,7 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useProductStore } from '@/stores/useProductStore';
+import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useI18n } from '@/i18n';
 
 const NAYAX_INTEGRATION_LOG_TYPE = 'nayax_card_integration';
@@ -59,6 +60,8 @@ export function SettingsPage() {
   >([]);
   const [integrationLogsTotal, setIntegrationLogsTotal] = useState(0);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isDeletingTransactions, setIsDeletingTransactions] = useState(false);
+  const deleteAllTransactions = useTransactionStore((s) => s.deleteAllTransactions);
 
   useEffect(() => {
     loadDatabasePath();
@@ -247,6 +250,42 @@ export function SettingsPage() {
     }
   };
 
+  const handleDeleteAllTransactions = async () => {
+    if (!window.electronAPI?.showMessageBox || !window.electronAPI?.dbDeleteAllTransactions) {
+      setTestResult({ success: false, message: t('settings.resetTransactionsFailed') });
+      return;
+    }
+    const confirm = await window.electronAPI.showMessageBox({
+      type: 'warning',
+      title: t('settings.resetTransactionsTitle'),
+      message: t('settings.resetTransactionsMessage'),
+      buttons: [t('common.cancel'), t('settings.resetTransactionsConfirm')],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (confirm.response !== 1) {
+      return;
+    }
+    setIsDeletingTransactions(true);
+    setTestResult(null);
+    try {
+      const result = await deleteAllTransactions();
+      if (result.success) {
+        setTestResult({ success: true, message: t('settings.resetTransactionsSuccess') });
+      } else {
+        setTestResult({
+          success: false,
+          message: result.error || t('settings.resetTransactionsFailed'),
+        });
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setTestResult({ success: false, message: msg || t('settings.resetTransactionsFailed') });
+    } finally {
+      setIsDeletingTransactions(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -334,6 +373,26 @@ export function SettingsPage() {
             >
               <Download className="h-4 w-4" />
               {isBackingUp ? t('settings.backingUp') : t('settings.backupDatabase')}
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+            <div>
+              <h4 className="font-semibold flex items-center gap-2 text-destructive">
+                <Trash2 className="h-4 w-4" />
+                {t('settings.resetTransactionsSection')}
+              </h4>
+              <p className="text-sm text-muted-foreground mt-1">{t('settings.resetTransactionsDesc')}</p>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDeleteAllTransactions}
+              disabled={isDeletingTransactions || !dbPath}
+              className="flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              {isDeletingTransactions ? t('settings.resetTransactionsDeleting') : t('settings.resetTransactionsButton')}
             </Button>
           </div>
 

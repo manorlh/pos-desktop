@@ -4,7 +4,7 @@ type Language = 'he' | 'en';
 
 interface SettingsStore {
   virtualKeyboardEnabled: boolean;
-  globalTaxRate: number; // Tax rate as decimal (e.g., 0.08 for 8%)
+  globalTaxRate: number; // Tax rate as decimal (e.g., 0.18 for 18%)
   hideOutOfStockProducts: boolean;
   language: Language;
   nayaxEnabled: boolean;
@@ -25,7 +25,7 @@ interface SettingsStore {
 
 export const useSettingsStore = create<SettingsStore>((set) => ({
   virtualKeyboardEnabled: true, // Default to enabled
-  globalTaxRate: 0.08, // Default 8% tax rate
+  globalTaxRate: 0.18, // Israel standard VAT 18%
   hideOutOfStockProducts: true, // Default to hiding out of stock products
   language: 'he', // Default to Hebrew
   nayaxEnabled: false,
@@ -48,7 +48,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
         
         set({
           virtualKeyboardEnabled: enabled === null ? true : enabled === 'true',
-          globalTaxRate: taxRateStr === null ? 0.08 : parseFloat(taxRateStr) / 100, // Convert percentage to decimal
+          globalTaxRate: taxRateStr === null ? 0.18 : parseFloat(taxRateStr) / 100, // Convert percentage to decimal
           hideOutOfStockProducts: hideOutOfStock === null ? true : hideOutOfStock === 'true',
           language: (language === 'en' || language === 'he') ? language : 'he',
           nayaxEnabled: nayaxEnabled === 'true',
