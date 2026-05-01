@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   initializeDatabase: (path: string) => ipcRenderer.invoke('initialize-database', path),
   databaseExists: (path: string) => ipcRenderer.invoke('database-exists', path),
   backupDatabase: (path: string) => ipcRenderer.invoke('backup-database', path),
+  /** Erase SQLite at path (or default from settings) and recreate empty schema. */
+  resetDatabase: (path?: string) => ipcRenderer.invoke('reset-database', path),
   selectDatabasePath: () => ipcRenderer.invoke('select-database-path'),
   
   // Database operations
@@ -86,11 +88,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMainProcessMessage: (callback: (message: string) => void) => {
     ipcRenderer.on('main-process-message', (event, message) => callback(message));
   },
+  /** Fires after main-process sync writes cloud catalog changes to SQLite. Returns an unsubscribe. */
+  onCatalogUpdated: (
+    callback: (info: { syncType: string; products: number; categories: number }) => void,
+  ) => {
+    const handler = (_event: unknown, info: { syncType: string; products: number; categories: number }) =>
+      callback(info);
+    ipcRenderer.on('catalog-updated', handler);
+    return () => ipcRenderer.off('catalog-updated', handler);
+  },
 
   // Cloud sync
+  cloudPairingValidate: (payload: { apiBaseUrl: string; code: string; machineName?: string }) =>
+    ipcRenderer.invoke('cloud-pairing-validate', payload),
   syncConnect: (config: any) => ipcRenderer.invoke('sync-connect', config),
   syncDisconnect: () => ipcRenderer.invoke('sync-disconnect'),
   syncGetStatus: () => ipcRenderer.invoke('sync-get-status'),
+  syncPullCatalog: () => ipcRenderer.invoke('sync-pull-catalog'),
+  syncRefreshMachineContext: () => ipcRenderer.invoke('sync-refresh-machine-context'),
   syncEnqueue: (data: any) => ipcRenderer.invoke('sync-enqueue', data),
   syncFlushQueue: () => ipcRenderer.invoke('sync-flush-queue'),
 });

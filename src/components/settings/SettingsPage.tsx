@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText, Trash2 } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText, Trash2, Cloud } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -13,6 +13,20 @@ import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useI18n } from '@/i18n';
 
 const NAYAX_INTEGRATION_LOG_TYPE = 'nayax_card_integration';
+
+type CloudPairSession = {
+  apiBaseUrl: string;
+  accessToken: string;
+  machineId: string;
+  merchantId: string;
+  shopId: string;
+  mqttHost: string;
+  mqttPort: number;
+  mqttClientId: string;
+  mqttUsername: string;
+  mqttPassword: string;
+  machineCode: string;
+};
 
 export function SettingsPage() {
   const [dbPath, setDbPath] = useState<string>('');
@@ -39,7 +53,7 @@ export function SettingsPage() {
     setNayaxDevicePort,
     setNayaxSpicyPath,
   } = useSettingsStore();
-  const { filterProducts } = useProductStore();
+  const { filterProducts, loadProducts, loadCategories } = useProductStore();
   const { t, setLanguage: setI18nLanguage, locale } = useI18n();
   const [taxRateInput, setTaxRateInput] = useState<string>('');
   const [nayaxHostInput, setNayaxHostInput] = useState('');
@@ -61,11 +75,58 @@ export function SettingsPage() {
   const [integrationLogsTotal, setIntegrationLogsTotal] = useState(0);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isDeletingTransactions, setIsDeletingTransactions] = useState(false);
+  const [isCleaningDatabase, setIsCleaningDatabase] = useState(false);
   const deleteAllTransactions = useTransactionStore((s) => s.deleteAllTransactions);
+
+  const [cloudApiBase, setCloudApiBase] = useState('');
+  const [cloudPairingCode, setCloudPairingCode] = useState('');
+  const [cloudMachineName, setCloudMachineName] = useState('');
+  const [cloudSession, setCloudSession] = useState<CloudPairSession | null>(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudMessage, setCloudMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{
+    enabled: boolean;
+    connected: boolean;
+    lastSyncedAt: string | null;
+  } | null>(null);
+
+  const refreshSyncStatus = async () => {
+    if (!window.electronAPI?.syncGetStatus) return;
+    const r = await window.electronAPI.syncGetStatus();
+    if (r.success && 'status' in r) {
+      setSyncStatus({
+        enabled: r.status.enabled,
+        connected: r.status.connected,
+        lastSyncedAt: r.status.lastSyncedAt,
+      });
+    }
+  };
+
+  const applyCloudConnect = async (session: CloudPairSession) => {
+    return window.electronAPI!.syncConnect({
+      apiBaseUrl: session.apiBaseUrl,
+      accessToken: session.accessToken,
+      machineId: session.machineId,
+      merchantId: session.merchantId || '',
+      host: session.mqttHost,
+      port: session.mqttPort,
+      clientId: session.mqttClientId,
+      username: session.mqttUsername,
+      password: session.mqttPassword,
+    });
+  };
 
   useEffect(() => {
     loadDatabasePath();
     loadSettings();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const base = await window.electronAPI?.dbGetSetting('cloud_api_base');
+      if (base) setCloudApiBase(base);
+      await refreshSyncStatus();
+    })();
   }, []);
 
   const loadIntegrationLogs = async () => {
@@ -250,6 +311,131 @@ export function SettingsPage() {
     }
   };
 
+  const handleCloudPairAndConnect = async () => {
+    setCloudMessage(null);
+    if (!window.electronAPI?.cloudPairingValidate) {
+      setCloudMessage({ type: 'err', text: t('settings.cloudNotElectron') });
+      return;
+    }
+    if (!cloudApiBase.trim() || !cloudPairingCode.trim()) {
+      setCloudMessage({ type: 'err', text: t('errors.required') });
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const res = await window.electronAPI.cloudPairingValidate({
+        apiBaseUrl: cloudApiBase.trim(),
+        code: cloudPairingCode.trim(),
+        machineName: cloudMachineName.trim() || undefined,
+      });
+      if (!res.success) {
+        setCloudMessage({ type: 'err', text: res.error || t('settings.cloudPairingFailed') });
+        return;
+      }
+      const session: CloudPairSession = {
+        apiBaseUrl: res.apiBaseUrl,
+        accessToken: res.accessToken,
+        machineId: res.machineId,
+        merchantId: res.merchantId,
+        shopId: res.shopId,
+        mqttHost: res.mqttHost,
+        mqttPort: res.mqttPort,
+        mqttClientId: res.mqttClientId,
+        mqttUsername: res.mqttUsername,
+        mqttPassword: res.mqttPassword,
+        machineCode: res.machineCode,
+      };
+      setCloudSession(session);
+      const conn = await applyCloudConnect(session);
+      if (!conn.success) {
+        setCloudMessage({ type: 'err', text: conn.error || t('settings.cloudPairingFailed') });
+        return;
+      }
+      setCloudPairingCode('');
+      setCloudMessage({ type: 'ok', text: t('settings.cloudConnectOk') });
+      await loadProducts();
+      await loadCategories();
+      await refreshSyncStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setCloudMessage({ type: 'err', text: msg });
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudRefreshMerchant = async () => {
+    if (!window.electronAPI?.syncRefreshMachineContext || !cloudSession) return;
+    setCloudBusy(true);
+    setCloudMessage(null);
+    try {
+      const r = await window.electronAPI.syncRefreshMachineContext();
+      if (!r.success) {
+        setCloudMessage({ type: 'err', text: r.error ?? t('settings.cloudPairingFailed') });
+        return;
+      }
+      const next: CloudPairSession = {
+        ...cloudSession,
+        merchantId: r.merchantId || cloudSession.merchantId,
+        shopId: r.shopId || cloudSession.shopId,
+      };
+      setCloudSession(next);
+      const conn = await applyCloudConnect(next);
+      if (!conn.success) {
+        setCloudMessage({ type: 'err', text: conn.error || t('settings.cloudPairingFailed') });
+        return;
+      }
+      setCloudMessage({ type: 'ok', text: t('settings.cloudConnectOk') });
+      await refreshSyncStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setCloudMessage({ type: 'err', text: msg });
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudPullCatalog = async () => {
+    if (!window.electronAPI?.syncPullCatalog) return;
+    setCloudBusy(true);
+    setCloudMessage(null);
+    try {
+      const r = await window.electronAPI.syncPullCatalog();
+      if (!r.success) {
+        setCloudMessage({ type: 'err', text: r.error || t('settings.cloudPullFailed') });
+        return;
+      }
+      await loadProducts();
+      await loadCategories();
+      await refreshSyncStatus();
+      setCloudMessage({
+        type: 'ok',
+        text: t('settings.cloudPullOk', {
+          products: r.products ?? 0,
+          categories: r.categories ?? 0,
+        }),
+      });
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudDisconnect = async () => {
+    if (!window.electronAPI?.syncDisconnect) return;
+    setCloudBusy(true);
+    try {
+      await window.electronAPI.syncDisconnect();
+      setCloudSession(null);
+      setCloudMessage({ type: 'ok', text: t('settings.cloudDisconnectOk') });
+      await refreshSyncStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setCloudMessage({ type: 'err', text: msg });
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
   const handleDeleteAllTransactions = async () => {
     if (!window.electronAPI?.showMessageBox || !window.electronAPI?.dbDeleteAllTransactions) {
       setTestResult({ success: false, message: t('settings.resetTransactionsFailed') });
@@ -283,6 +469,56 @@ export function SettingsPage() {
       setTestResult({ success: false, message: msg || t('settings.resetTransactionsFailed') });
     } finally {
       setIsDeletingTransactions(false);
+    }
+  };
+
+  const handleCleanDatabase = async () => {
+    if (!window.electronAPI?.resetDatabase) {
+      return;
+    }
+    if (!dbPath) {
+      setTestResult({ success: false, message: t('settings.pleaseEnterDbPath') });
+      return;
+    }
+    const confirm = await window.electronAPI.showMessageBox({
+      type: 'warning',
+      title: t('settings.cleanDatabaseTitle'),
+      message: t('settings.cleanDatabaseMessage'),
+      buttons: [t('common.cancel'), t('settings.cleanDatabaseConfirm')],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (confirm.response !== 1) {
+      return;
+    }
+    setIsCleaningDatabase(true);
+    setTestResult(null);
+    try {
+      const result = await window.electronAPI.resetDatabase(dbPath);
+      if (result.success) {
+        setTestResult({ success: true, message: t('settings.cleanDatabaseSuccess') });
+        setCloudSession(null);
+        setCloudApiBase('');
+        setCloudPairingCode('');
+        setCloudMachineName('');
+        setCloudMessage(null);
+        await loadProducts();
+        await loadCategories();
+        await loadSettings();
+        await refreshSyncStatus();
+        setIntegrationLogs([]);
+        setIntegrationLogsTotal(0);
+      } else {
+        setTestResult({
+          success: false,
+          message: result.error || t('settings.cleanDatabaseFailed'),
+        });
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setTestResult({ success: false, message: msg || t('settings.cleanDatabaseFailed') });
+    } finally {
+      setIsCleaningDatabase(false);
     }
   };
 
@@ -388,11 +624,36 @@ export function SettingsPage() {
               type="button"
               variant="destructive"
               onClick={handleDeleteAllTransactions}
-              disabled={isDeletingTransactions || !dbPath}
+              disabled={isDeletingTransactions || isCleaningDatabase || !dbPath}
               className="flex items-center gap-2"
             >
               <Trash2 className="h-4 w-4" />
               {isDeletingTransactions ? t('settings.resetTransactionsDeleting') : t('settings.resetTransactionsButton')}
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+            <div>
+              <h4 className="font-semibold flex items-center gap-2 text-destructive">
+                <Trash2 className="h-4 w-4" />
+                {t('settings.cleanDatabaseSection')}
+              </h4>
+              <p className="text-sm text-muted-foreground mt-1">{t('settings.cleanDatabaseDesc')}</p>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleCleanDatabase}
+              disabled={
+                isCleaningDatabase ||
+                isDeletingTransactions ||
+                !dbPath ||
+                !window.electronAPI?.resetDatabase
+              }
+              className="flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              {isCleaningDatabase ? t('settings.cleanDatabaseWorking') : t('settings.cleanDatabaseButton')}
             </Button>
           </div>
 
@@ -405,6 +666,145 @@ export function SettingsPage() {
               <li>{t('settings.ensureWritePermissions')}</li>
             </ul>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cloud className="h-5 w-5" />
+            {t('settings.cloudSyncTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.cloudSyncDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!window.electronAPI?.cloudPairingValidate ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{t('settings.cloudNotElectron')}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="space-y-2">
+            <Label htmlFor="cloud-api-base">{t('settings.cloudApiBase')}</Label>
+            <Input
+              id="cloud-api-base"
+              value={cloudApiBase}
+              onChange={(e) => setCloudApiBase(e.target.value)}
+              placeholder={t('settings.cloudApiBasePlaceholder')}
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">{t('settings.cloudApiBaseHint')}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cloud-pair-code">{t('settings.cloudPairingCode')}</Label>
+            <Input
+              id="cloud-pair-code"
+              value={cloudPairingCode}
+              onChange={(e) => setCloudPairingCode(e.target.value)}
+              placeholder={t('settings.cloudPairingCodePlaceholder')}
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cloud-machine-name">{t('settings.cloudMachineName')}</Label>
+            <Input
+              id="cloud-machine-name"
+              value={cloudMachineName}
+              onChange={(e) => setCloudMachineName(e.target.value)}
+              placeholder={t('settings.cloudMachineNamePlaceholder')}
+              autoComplete="off"
+            />
+          </div>
+
+          {cloudMessage ? (
+            <Alert variant={cloudMessage.type === 'ok' ? 'default' : 'destructive'}>
+              {cloudMessage.type === 'ok' ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4" />
+              )}
+              <AlertDescription>{cloudMessage.text}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {cloudSession ? (
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1">
+              <p>
+                <span className="text-muted-foreground">{t('settings.cloudSessionMachine')}: </span>
+                <span className="font-mono">{cloudSession.machineCode}</span>
+              </p>
+              <p>
+                <span className="text-muted-foreground">{t('settings.cloudSessionMerchant')}: </span>
+                <span className="font-mono">{cloudSession.merchantId || '—'}</span>
+              </p>
+              {!cloudSession.merchantId ? (
+                <p className="text-amber-700 dark:text-amber-500 text-xs pt-1">
+                  {t('settings.cloudSessionMissingMerchant')}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {syncStatus ? (
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>
+                {t('settings.cloudStatus')}: {syncStatus.enabled ? t('settings.cloudStatusEnabled') : '—'} ·{' '}
+                {t('settings.cloudStatusMqtt')}{' '}
+                {syncStatus.connected
+                  ? t('settings.cloudStatusConnected')
+                  : t('settings.cloudStatusDisconnected')}
+              </p>
+              <p>
+                {t('settings.cloudLastSync')}:{' '}
+                {syncStatus.lastSyncedAt
+                  ? new Date(syncStatus.lastSyncedAt).toLocaleString(locale)
+                  : t('settings.cloudNever')}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => void handleCloudPairAndConnect()}
+              disabled={
+                cloudBusy ||
+                !window.electronAPI?.cloudPairingValidate ||
+                !cloudApiBase.trim() ||
+                !cloudPairingCode.trim()
+              }
+            >
+              {cloudBusy ? t('settings.cloudValidating') : t('settings.cloudValidateConnect')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleCloudRefreshMerchant()}
+              disabled={cloudBusy || !cloudSession || !window.electronAPI?.syncRefreshMachineContext}
+            >
+              {t('settings.cloudRefreshMerchant')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleCloudPullCatalog()}
+              disabled={cloudBusy || !window.electronAPI?.syncPullCatalog}
+            >
+              {t('settings.cloudPullCatalog')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleCloudDisconnect()}
+              disabled={cloudBusy || !window.electronAPI?.syncDisconnect}
+            >
+              {t('settings.cloudDisconnect')}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('settings.cloudRefreshMerchantHint')}</p>
         </CardContent>
       </Card>
 

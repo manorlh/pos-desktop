@@ -8,7 +8,6 @@ import { useBusinessStore } from './stores/useBusinessStore';
 import { useDatabaseStore } from './stores/useDatabaseStore';
 import { useSettingsStore } from './stores/useSettingsStore';
 import { useTradingDayStore } from './stores/useTradingDayStore';
-import { mockProducts, mockCategories, mockUser } from './data/mockData';
 import './globals.css';
 
 function App() {
@@ -16,7 +15,6 @@ function App() {
   const [initError, setInitError] = useState<string | null>(null);
   const [language, setLanguage] = useState<'he' | 'en'>('he');
   
-  const { setProducts, setCategories } = useProductStore();
   const { setCurrentUser } = useTransactionStore();
   const { setDbPath } = useDatabaseStore();
   const { businessInfo, softwareInfo } = useBusinessStore();
@@ -45,38 +43,9 @@ function App() {
       // Check if database is empty (first run)
       const existingProducts = await window.electronAPI.dbGetProducts();
       const existingCategories = await window.electronAPI.dbGetCategories();
-      const existingUsers = await window.electronAPI.dbGetUsers();
-      
-      // If database is empty, seed with mock data
+
+      // First run: persist bundled business config when catalog is still empty
       if (existingProducts.length === 0 && existingCategories.length === 0) {
-        console.log('Database is empty, seeding with initial data...');
-        
-        // Save categories
-        for (const category of mockCategories) {
-          await window.electronAPI.dbSaveCategory({
-            ...category,
-            createdAt: category.createdAt.toISOString(),
-            updatedAt: category.updatedAt.toISOString(),
-          });
-        }
-        
-        // Save products
-        for (const product of mockProducts) {
-          await window.electronAPI.dbSaveProduct({
-            ...product,
-            createdAt: product.createdAt.toISOString(),
-            updatedAt: product.updatedAt.toISOString(),
-          });
-        }
-        
-        // Save default user
-        await window.electronAPI.dbSaveUser({
-          ...mockUser,
-          createdAt: mockUser.createdAt.toISOString(),
-          updatedAt: mockUser.updatedAt.toISOString(),
-        });
-        
-        // Save business info (from JSON config)
         await window.electronAPI.dbSaveBusinessInfo(businessInfo);
         await window.electronAPI.dbSaveSoftwareInfo(softwareInfo);
       }
@@ -86,15 +55,13 @@ function App() {
       await loadProducts();
       await loadCategories();
       
-      // Set current user
-      const users = existingUsers.length > 0 
-        ? existingUsers.map((u: any) => ({
-            ...u,
-            createdAt: new Date(u.createdAt),
-            updatedAt: new Date(u.updatedAt),
-          }))
-        : [mockUser];
-      setCurrentUser(users[0]);
+      const usersRaw = await window.electronAPI.dbGetUsers();
+      const users = usersRaw.map((u: any) => ({
+        ...u,
+        createdAt: new Date(u.createdAt),
+        updatedAt: new Date(u.updatedAt),
+      }));
+      setCurrentUser(users[0] ?? null);
       
       // Load business info
       const { loadFromDatabase } = useBusinessStore.getState();
@@ -118,11 +85,6 @@ function App() {
     } catch (error: any) {
       console.error('Failed to initialize app:', error);
       setInitError(error.message || 'Failed to initialize application');
-      
-      // Fallback to mock data if database fails
-      setProducts(mockProducts);
-      setCategories(mockCategories);
-      setCurrentUser(mockUser);
       setIsInitializing(false);
     }
   };
@@ -135,6 +97,18 @@ function App() {
         setLanguage(newLanguage);
       }
     );
+    return unsubscribe;
+  }, []);
+
+  // Refresh product/category stores when the main process applies a cloud catalog pull,
+  // so price/name edits from the cloud show up without a manual page refresh.
+  useEffect(() => {
+    if (!window.electronAPI?.onCatalogUpdated) return;
+    const unsubscribe = window.electronAPI.onCatalogUpdated(() => {
+      const { loadProducts, loadCategories } = useProductStore.getState();
+      void loadProducts();
+      void loadCategories();
+    });
     return unsubscribe;
   }, []);
 

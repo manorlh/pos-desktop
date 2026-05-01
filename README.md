@@ -126,18 +126,10 @@ scripts/
 - Payment method tracking
 - Transaction search and filtering
 
-## Mock Data
-
-The application comes with comprehensive mock data including:
-- 15+ sample products across 5 categories
-- Multiple payment methods
-- Sample user/cashier data
-- Transaction templates
-
 ## Customization
 
 ### Adding New Products
-Edit `src/data/mockData.ts` to add new products, categories, or payment methods.
+Add products and categories through the app UI; they are stored in the local SQLite database.
 
 ### Styling
 The app uses Tailwind CSS with a custom design system. Modify `src/globals.css` for theme changes.

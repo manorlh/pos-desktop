@@ -100,6 +100,7 @@ interface ElectronAPI {
   initializeDatabase: (path: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   databaseExists: (path: string) => Promise<boolean>;
   backupDatabase: (path: string) => Promise<{ success: boolean; backupPath?: string; error?: string }>;
+  resetDatabase: (path?: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   selectDatabasePath: () => Promise<string | null>;
   
   // Database operations
@@ -142,6 +143,59 @@ interface ElectronAPI {
   
   onMenuNewSale: (callback: () => void) => void;
   onMainProcessMessage: (callback: (message: string) => void) => void;
+  /** Subscribe to main-process catalog sync updates. Returns an unsubscribe function. */
+  onCatalogUpdated: (
+    callback: (info: { syncType: string; products: number; categories: number }) => void,
+  ) => () => void;
+
+  cloudPairingValidate: (payload: {
+    apiBaseUrl: string;
+    code: string;
+    machineName?: string;
+  }) => Promise<
+    | {
+        success: true;
+        apiBaseUrl: string;
+        machineId: string;
+        merchantId: string;
+        shopId: string;
+        accessToken: string;
+        mqttClientId: string;
+        mqttUsername: string;
+        mqttPassword: string;
+        machineCode: string;
+        mqttHost: string;
+        mqttPort: number;
+      }
+    | { success: false; error: string; statusCode?: number }
+  >;
+  syncConnect: (config: {
+    apiBaseUrl: string;
+    accessToken: string;
+    machineId: string;
+    merchantId?: string;
+    host: string;
+    port: number;
+    clientId?: string;
+    username?: string;
+    password?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  syncDisconnect: () => Promise<{ success: boolean; error?: string }>;
+  syncGetStatus: () => Promise<
+    { success: true; status: { enabled: boolean; connected: boolean; pendingCount: number; lastSyncedAt: string | null } } | { success: false; error?: string }
+  >;
+  syncPullCatalog: () => Promise<{
+    success: boolean;
+    status?: unknown;
+    error?: string;
+    products?: number;
+    categories?: number;
+  }>;
+  syncRefreshMachineContext: () => Promise<
+    { success: true; merchantId: string | null; shopId: string | null } | { success: false; error?: string }
+  >;
+  syncEnqueue: (data: unknown) => Promise<{ success: boolean; error?: string }>;
+  syncFlushQueue: () => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {

@@ -162,6 +162,7 @@ export function createSchema(db: any): void {
       stockQuantity INTEGER NOT NULL DEFAULT 0,
       barcode TEXT,
       taxRate REAL,
+      shopListed INTEGER NOT NULL DEFAULT 1,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       FOREIGN KEY (categoryId) REFERENCES categories(id)

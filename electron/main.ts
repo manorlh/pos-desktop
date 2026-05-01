@@ -6,6 +6,7 @@ const iconv = require('iconv-lite');
 const crypto = require('crypto');
 
 import { syncService } from './syncService';
+import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate } from './cloudPairing';
 
 import {
   callNayaxJsonRpc,
@@ -142,6 +143,7 @@ function createSchema(db: any): void {
       stockQuantity INTEGER NOT NULL DEFAULT 0,
       barcode TEXT,
       taxRate REAL,
+      shopListed INTEGER NOT NULL DEFAULT 1,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       FOREIGN KEY (categoryId) REFERENCES categories(id)
@@ -363,6 +365,7 @@ function initializeDatabaseMain(dbPath: string): any {
   
   createSchema(dbInstance);
   syncService.init(dbInstance);
+  tryReconnectCloudMqttFromDb(dbInstance);
 
   return dbInstance;
 }
@@ -378,6 +381,32 @@ function closeDatabaseMain(): void {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
+  }
+}
+
+/** Active DB path from app settings.json (same rules as get-database-path IPC). */
+function getResolvedDatabasePathMain(): string {
+  const userDataPath = app.getPath('userData');
+  const defaultPath = path.join(userDataPath, 'database', 'pos.db');
+  const settingsPath = path.join(userDataPath, 'settings.json');
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (settings.databasePath && typeof settings.databasePath === 'string') {
+        return settings.databasePath;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading settings for database path:', e);
+  }
+  return defaultPath;
+}
+
+function deleteDatabaseFilesOnDisk(dbPath: string): void {
+  for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (fs.existsSync(p)) {
+      fs.unlinkSync(p);
+    }
   }
 }
 
@@ -398,6 +427,8 @@ function getAllProducts(db: any): any[] {
     taxRate: row.taxRate || undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    cloud_id: row.cloud_id || undefined,
+    cloudId: row.cloud_id || undefined,
   }));
 }
 
@@ -438,6 +469,8 @@ function getAllCategories(db: any): any[] {
     sortOrder: row.sortOrder,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    cloud_id: row.cloud_id || undefined,
+    cloudId: row.cloud_id || undefined,
   }));
 }
 
@@ -460,6 +493,111 @@ function saveCategory(db: any, category: any): void {
     category.createdAt,
     category.updatedAt
   );
+}
+
+function readSettingMain(db: any, key: string): string | null {
+  const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return r ? r.value : null;
+}
+
+function isCloudSyncEnabledMain(db: any): boolean {
+  const v = readSettingMain(db, 'cloud_sync_enabled');
+  return v === '1' || v === 'true';
+}
+
+/** Restore MQTT + sync config from SQLite after restart (sync-connect is only called during pairing). */
+function tryReconnectCloudMqttFromDb(db: any): void {
+  if (!isCloudSyncEnabledMain(db)) return;
+  const host = readSettingMain(db, 'mqtt_cloud_host');
+  const portStr = readSettingMain(db, 'mqtt_cloud_port');
+  const merchantId = readSettingMain(db, 'cloud_merchant_id');
+  const machineId = readSettingMain(db, 'cloud_machine_id');
+  const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
+  const accessToken = readSettingMain(db, 'cloud_access_token');
+  if (!host?.trim() || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
+    return;
+  }
+  if (!merchantId?.trim()) {
+    console.warn('[Cloud] MQTT reconnect skipped — no merchantId in settings');
+    return;
+  }
+  const port = portStr ? parseInt(portStr, 10) : 1883;
+  const clientId = readSettingMain(db, 'mqtt_cloud_client_id');
+  const username = readSettingMain(db, 'mqtt_cloud_username');
+  const password = readSettingMain(db, 'mqtt_cloud_password');
+  try {
+    syncService.init(db);
+    syncService.connect({
+      host: host.trim(),
+      port: Number.isFinite(port) && port > 0 ? port : 1883,
+      merchantId: merchantId.trim(),
+      machineId: machineId.trim(),
+      apiBaseUrl: apiBaseUrl.trim(),
+      accessToken: accessToken.trim(),
+      clientId: clientId || undefined,
+      username: username || undefined,
+      password: password || undefined,
+    });
+    console.log('[Cloud] MQTT reconnect attempted from stored settings');
+  } catch (e) {
+    console.error('[Cloud] MQTT reconnect from DB failed:', e);
+  }
+}
+
+function productToCloudPostPayload(product: any): Record<string, unknown> {
+  return {
+    name: product.name,
+    description: product.description ?? null,
+    price: Number(product.price),
+    sku: product.sku,
+    categoryId: product.categoryId,
+    imageUrl: product.imageUrl ?? null,
+    inStock: !!product.inStock,
+    stockQuantity: Number(product.stockQuantity || 0),
+    barcode: product.barcode ?? null,
+    taxRate: product.taxRate != null ? Number(product.taxRate) : null,
+    catalogLevel: 'global',
+  };
+}
+
+function productToCloudPutPayload(product: any): Record<string, unknown> {
+  return {
+    name: product.name,
+    description: product.description ?? null,
+    price: Number(product.price),
+    sku: product.sku,
+    categoryId: product.categoryId,
+    imageUrl: product.imageUrl ?? null,
+    inStock: !!product.inStock,
+    stockQuantity: Number(product.stockQuantity || 0),
+    barcode: product.barcode ?? null,
+    taxRate: product.taxRate != null ? Number(product.taxRate) : null,
+  };
+}
+
+function categoryToCloudPostPayload(category: any): Record<string, unknown> {
+  return {
+    name: category.name,
+    description: category.description ?? null,
+    color: category.color ?? null,
+    imageUrl: category.imageUrl ?? null,
+    parentId: category.parentId ?? null,
+    isActive: !!category.isActive,
+    sortOrder: Number(category.sortOrder || 0),
+    catalogLevel: 'global',
+  };
+}
+
+function categoryToCloudPutPayload(category: any): Record<string, unknown> {
+  return {
+    name: category.name,
+    description: category.description ?? null,
+    color: category.color ?? null,
+    imageUrl: category.imageUrl ?? null,
+    parentId: category.parentId ?? null,
+    isActive: !!category.isActive,
+    sortOrder: Number(category.sortOrder || 0),
+  };
 }
 
 function getAllUsers(db: any): any[] {
@@ -1871,19 +2009,7 @@ ipcMain.handle('print-report-summary', async (event, summary) => {
 
 ipcMain.handle('get-database-path', async () => {
   try {
-    const userDataPath = app.getPath('userData');
-    const defaultPath = path.join(userDataPath, 'database', 'pos.db');
-    
-    // Try to read from settings
-    const settingsPath = path.join(userDataPath, 'settings.json');
-    if (fs.existsSync(settingsPath)) {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      if (settings.databasePath) {
-        return settings.databasePath;
-      }
-    }
-    
-    return defaultPath;
+    return getResolvedDatabasePathMain();
   } catch (error: any) {
     console.error('Error getting database path:', error);
     const userDataPath = app.getPath('userData');
@@ -1952,6 +2078,22 @@ ipcMain.handle('backup-database', async (event, dbPath: string) => {
   }
 });
 
+/** Delete SQLite files, recreate empty schema. Disconnects MQTT/sync first. */
+ipcMain.handle('reset-database', async (_event, targetPath?: string) => {
+  try {
+    const dbPath =
+      targetPath && String(targetPath).trim() ? String(targetPath).trim() : getResolvedDatabasePathMain();
+    syncService.disconnect();
+    closeDatabaseMain();
+    deleteDatabaseFilesOnDisk(dbPath);
+    initializeDatabaseMain(dbPath);
+    return { success: true, path: dbPath };
+  } catch (error: any) {
+    console.error('Error resetting database:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('select-database-path', async () => {
   try {
     const result = await dialog.showSaveDialog(win!, {
@@ -1988,6 +2130,26 @@ ipcMain.handle('db-get-products', async () => {
 ipcMain.handle('db-save-product', async (event, product: any) => {
   try {
     const db = getDatabaseMain();
+    syncService.init(db);
+    if (isCloudSyncEnabledMain(db) && syncService.readCloudHttpConfigFromDb()) {
+      const cfg = syncService.readCloudHttpConfigFromDb()!;
+      const cloudId = product.cloud_id || product.cloudId;
+      const relPath = cloudId
+        ? `/sync/${cfg.machineId}/products/${cloudId}`
+        : `/sync/${cfg.machineId}/products`;
+      const method = cloudId ? 'PUT' : 'POST';
+      const body = cloudId ? productToCloudPutPayload(product) : productToCloudPostPayload(product);
+      return await new Promise((resolve) => {
+        syncService.cloudJson(method, relPath, body, (err: Error | null) => {
+          if (err) {
+            console.error('[Cloud] save product failed:', err.message);
+            return resolve({ success: false, error: err.message });
+          }
+          syncService.pullCatalog();
+          resolve({ success: true });
+        });
+      });
+    }
     saveProduct(db, product);
     return { success: true };
   } catch (error: any) {
@@ -2009,6 +2171,26 @@ ipcMain.handle('db-get-categories', async () => {
 ipcMain.handle('db-save-category', async (event, category: any) => {
   try {
     const db = getDatabaseMain();
+    syncService.init(db);
+    if (isCloudSyncEnabledMain(db) && syncService.readCloudHttpConfigFromDb()) {
+      const cfg = syncService.readCloudHttpConfigFromDb()!;
+      const cloudId = category.cloud_id || category.cloudId;
+      const relPath = cloudId
+        ? `/sync/${cfg.machineId}/categories/${cloudId}`
+        : `/sync/${cfg.machineId}/categories`;
+      const method = cloudId ? 'PUT' : 'POST';
+      const body = cloudId ? categoryToCloudPutPayload(category) : categoryToCloudPostPayload(category);
+      return await new Promise((resolve) => {
+        syncService.cloudJson(method, relPath, body, (err: Error | null) => {
+          if (err) {
+            console.error('[Cloud] save category failed:', err.message);
+            return resolve({ success: false, error: err.message });
+          }
+          syncService.pullCatalog();
+          resolve({ success: true });
+        });
+      });
+    }
     saveCategory(db, category);
     return { success: true };
   } catch (error: any) {
@@ -2551,9 +2733,79 @@ ipcMain.handle('db-close-trading-day', async (event, id: string, data: any) => {
 
 // ── Cloud Sync IPC handlers ───────────────────────────────────────────────────
 
+ipcMain.handle(
+  'cloud-pairing-validate',
+  async (
+    _event,
+    payload: { apiBaseUrl: string; code: string; machineName?: string },
+  ): Promise<Record<string, unknown>> => {
+    try {
+      if (!payload?.apiBaseUrl?.trim() || !payload?.code?.trim()) {
+        return { success: false, error: 'API URL and pairing code are required' };
+      }
+      const r = await postPairingValidate(payload.apiBaseUrl, {
+        code: payload.code.trim(),
+        machine_name: payload.machineName?.trim() || undefined,
+      });
+      if (!r.ok) {
+        return { success: false, error: r.error, statusCode: r.statusCode };
+      }
+      const d = r.data;
+      const broker = String(d.mqttBrokerUrl || '');
+      const { host, port } = parseMqttBrokerUrl(broker);
+      const apiBaseUrl = normalizeApiBaseUrl(payload.apiBaseUrl);
+      return {
+        success: true,
+        apiBaseUrl,
+        machineId: String(d.machineId ?? ''),
+        merchantId: d.merchantId != null && d.merchantId !== '' ? String(d.merchantId) : '',
+        shopId: d.shopId != null && d.shopId !== '' ? String(d.shopId) : '',
+        accessToken: String(d.accessToken ?? ''),
+        mqttClientId: String(d.mqttClientId ?? ''),
+        mqttUsername: String(d.mqttUsername ?? ''),
+        mqttPassword: String(d.mqttPassword ?? ''),
+        machineCode: String(d.machineCode ?? ''),
+        mqttHost: host,
+        mqttPort: port,
+      };
+    } catch (e: any) {
+      console.error('[IPC] cloud-pairing-validate error:', e);
+      return { success: false, error: e?.message || 'Pairing failed' };
+    }
+  },
+);
+
 ipcMain.handle('sync-connect', async (_event, config: any) => {
   try {
-    syncService.connect(config);
+    const db = getDatabaseMain();
+    syncService.init(db);
+    const put = (k: string, v: string) =>
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, v);
+    if (config.apiBaseUrl) put('cloud_api_base', String(config.apiBaseUrl));
+    if (config.accessToken) put('cloud_access_token', String(config.accessToken));
+    if (config.machineId) put('cloud_machine_id', String(config.machineId));
+    if (config.merchantId != null) put('cloud_merchant_id', String(config.merchantId || ''));
+    put('cloud_sync_enabled', '1');
+    if (config.host) put('mqtt_cloud_host', String(config.host));
+    if (config.port != null) put('mqtt_cloud_port', String(config.port));
+    if (config.clientId != null && config.clientId !== '')
+      put('mqtt_cloud_client_id', String(config.clientId));
+    if (config.username != null && config.username !== '')
+      put('mqtt_cloud_username', String(config.username));
+    if (config.password != null && config.password !== '')
+      put('mqtt_cloud_password', String(config.password));
+
+    syncService.connect({
+      host: String(config.host),
+      port: Number(config.port) || 1883,
+      merchantId: String(config.merchantId || ''),
+      machineId: String(config.machineId),
+      apiBaseUrl: String(config.apiBaseUrl),
+      accessToken: String(config.accessToken),
+      clientId: config.clientId,
+      username: config.username,
+      password: config.password,
+    });
     return { success: true };
   } catch (error: any) {
     console.error('[IPC] sync-connect error:', error);
@@ -2564,9 +2816,58 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
 ipcMain.handle('sync-disconnect', async () => {
   try {
     syncService.disconnect();
+    const db = getDatabaseMain();
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cloud_sync_enabled', '0')").run();
+    const clear = (key: string) =>
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, '');
+    clear('mqtt_cloud_client_id');
+    clear('mqtt_cloud_username');
+    clear('mqtt_cloud_password');
     return { success: true };
   } catch (error: any) {
     console.error('[IPC] sync-disconnect error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-pull-catalog', async () => {
+  try {
+    const db = getDatabaseMain();
+    syncService.init(db);
+    const result = await syncService.pullCatalogImmediate();
+    return {
+      success: result.ok,
+      error: result.error,
+      products: result.products,
+      categories: result.categories,
+      status: syncService.getStatus(),
+    };
+  } catch (error: any) {
+    console.error('[IPC] sync-pull-catalog error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('sync-refresh-machine-context', async () => {
+  try {
+    const db = getDatabaseMain();
+    syncService.init(db);
+    return await new Promise((resolve) => {
+      syncService.cloudJson('GET', '/machines/me', null, (err: Error | null, _s?: number, data?: unknown) => {
+        if (err) {
+          return resolve({ success: false, error: err.message });
+        }
+        const d = data as Record<string, string | null> | null;
+        if (d && d.merchantId) {
+          db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+            'cloud_merchant_id',
+            String(d.merchantId),
+          );
+        }
+        resolve({ success: true, merchantId: d?.merchantId ?? null, shopId: d?.shopId ?? null });
+      });
+    });
+  } catch (error: any) {
     return { success: false, error: error.message };
   }
 });

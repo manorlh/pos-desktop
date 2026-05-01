@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "electron": "wait-on tcp:5173 && cross-env IS_DEV=true electron --inspect .",
     "electron:pack": "electron-builder",
-    "electron:dev": "concurrently \"npm run dev\" \"npm run electron\"",
+    "electron:dev": "cross-env IS_DEV=true vite",
     "electron:build": "npm run build && electron-builder --win",
     "dist": "npm run build && electron-builder --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",

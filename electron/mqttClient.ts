@@ -1,12 +1,6 @@
 /**
  * Cloud MQTT client for POS Desktop.
- *
- * Connects to the cloud MQTT broker and handles catalog sync messaging.
- *
- * Node 14 / Electron 13 compatible:
- *  - Uses mqtt v4.x (CommonJS)
- *  - No top-level await
- *  - No native fetch
+ * Subscribes to catalog/notify only; catalog data is fetched via HTTP GET.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -19,9 +13,14 @@ export interface CloudMqttConfig {
   port: number;
   merchantId: string;
   machineId: string;
+  /** Full API base e.g. http://localhost:8001/api/v1 */
+  apiBaseUrl: string;
+  accessToken: string;
   clientId?: string;
   username?: string;
   password?: string;
+  /** Called after MQTT connect (subscribe catalog/notify). Pull catalog over HTTP here. */
+  onMqttConnected?: () => void;
 }
 
 export class CloudMqttClient {
@@ -46,7 +45,7 @@ export class CloudMqttClient {
       clientId: config.clientId || `pos-machine-${config.machineId}`,
       username: config.username,
       password: config.password,
-      reconnectPeriod: 5000,
+      reconnectPeriod: 30000,
       connectTimeout: 10000,
       keepalive: 60,
       clean: true,
@@ -56,6 +55,9 @@ export class CloudMqttClient {
       this._connected = true;
       console.log('[MQTT] Connected to cloud broker');
       this._subscribeAll();
+      if (config.onMqttConnected) {
+        config.onMqttConnected();
+      }
     });
 
     this.client.on('reconnect', () => {
@@ -89,6 +91,7 @@ export class CloudMqttClient {
       this.client = null;
       this._connected = false;
     }
+    this.messageHandlers = [];
   }
 
   onMessage(handler: MqttMessageHandler): void {
@@ -103,7 +106,7 @@ export class CloudMqttClient {
     this.client.publish(topic, JSON.stringify(payload), { qos: 1 });
   }
 
-  /** Request full or delta catalog sync from the server. */
+  /** Ask server to emit catalog/notify (POS then pulls via HTTP). */
   requestCatalogSync(lastSyncedAt: string | null): void {
     if (!this.config) return;
     const { merchantId, machineId } = this.config;
@@ -112,21 +115,6 @@ export class CloudMqttClient {
     });
   }
 
-  /** Publish a single catalog change (product or category) to the server. */
-  publishCatalogUpdate(change: {
-    action: 'create' | 'update' | 'delete';
-    entity: 'product' | 'category';
-    localId: string;
-    cloudId: string | null;
-    updatedAt: string;
-    data: Record<string, unknown> | null;
-  }): void {
-    if (!this.config) return;
-    const { merchantId, machineId } = this.config;
-    this.publish(`pos/${merchantId}/${machineId}/catalog/update`, change as Record<string, unknown>);
-  }
-
-  /** Send a heartbeat to let the server know this machine is online. */
   publishHeartbeat(): void {
     if (!this.config) return;
     const { merchantId, machineId } = this.config;
@@ -140,23 +128,12 @@ export class CloudMqttClient {
     if (!this.config || !this.client) return;
     const { merchantId, machineId } = this.config;
 
-    const topics = [
-      `pos/${merchantId}/${machineId}/sync/products`,
-      `pos/${merchantId}/${machineId}/sync/categories`,
-      `pos/${merchantId}/${machineId}/sync/ack`,
-    ];
-
-    for (const topic of topics) {
-      this.client.subscribe(topic, { qos: 1 }, (err: Error | null) => {
-        if (err) console.error('[MQTT] Subscribe error on', topic, err.message);
-        else console.log('[MQTT] Subscribed:', topic);
-      });
-    }
-
-    // Ask for initial sync
-    this.requestCatalogSync(null);
+    const topic = `pos/${merchantId}/${machineId}/catalog/notify`;
+    this.client.subscribe(topic, { qos: 1 }, (err: Error | null) => {
+      if (err) console.error('[MQTT] Subscribe error on', topic, err.message);
+      else console.log('[MQTT] Subscribed:', topic);
+    });
   }
 }
 
-// Singleton instance used by syncService
 export const cloudMqttClient = new CloudMqttClient();
