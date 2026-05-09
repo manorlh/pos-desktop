@@ -28,6 +28,9 @@ export const useCartStore = create<CartStore>((set, get) => ({
   cart: createEmptyCart(),
 
   addItem: (product: Product, quantity = 1) => {
+    if (product.isAvailable === false) {
+      return;
+    }
     const { cart, calculateTotals } = get();
     const existingItemIndex = cart.items.findIndex(item => item.productId === product.id);
 

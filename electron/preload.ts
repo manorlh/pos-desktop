@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Trading day operations
   dbGetCurrentTradingDay: () => ipcRenderer.invoke('db-get-current-trading-day'),
   dbGetTradingDayByDate: (date: string) => ipcRenderer.invoke('db-get-trading-day-by-date', date),
+  dbGetTradingDayById: (id: string) => ipcRenderer.invoke('db-get-trading-day-by-id', id),
   dbGetTradingDaysByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-trading-days-by-date-range', startDate, endDate),
   dbOpenTradingDay: (data: any) => ipcRenderer.invoke('db-open-trading-day', data),
   dbCloseTradingDay: (id: string, data: any) => ipcRenderer.invoke('db-close-trading-day', id, data),
@@ -103,11 +104,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('cloud-pairing-validate', payload),
   syncConnect: (config: any) => ipcRenderer.invoke('sync-connect', config),
   syncDisconnect: () => ipcRenderer.invoke('sync-disconnect'),
+  cloudUnpair: () => ipcRenderer.invoke('cloud-unpair'),
   syncGetStatus: () => ipcRenderer.invoke('sync-get-status'),
   syncPullCatalog: () => ipcRenderer.invoke('sync-pull-catalog'),
   syncRefreshMachineContext: () => ipcRenderer.invoke('sync-refresh-machine-context'),
   syncEnqueue: (data: any) => ipcRenderer.invoke('sync-enqueue', data),
   syncFlushQueue: () => ipcRenderer.invoke('sync-flush-queue'),
+
+  // Cloud transaction sync (real-time push + Z-close hard barrier)
+  cloudSyncStats: () => ipcRenderer.invoke('cloud-sync-stats'),
+  cloudSyncFlush: () => ipcRenderer.invoke('cloud-sync-flush'),
+  cloudSyncOnlineHint: () => ipcRenderer.invoke('cloud-sync-online-hint'),
+  cloudZClose: (zPayload: any) => ipcRenderer.invoke('cloud-z-close', zPayload),
+  cloudPurgeClosedDay: (tradingDayId: string) =>
+    ipcRenderer.invoke('cloud-purge-closed-day', tradingDayId),
+
+  // POS users (per-shop cashier identities synced from cloud)
+  posUsersSyncNow: () => ipcRenderer.invoke('pos-users-sync-now'),
+  posUserListForShop: () => ipcRenderer.invoke('pos-users-list-for-shop'),
+  posUserLogin: (pin: string) => ipcRenderer.invoke('pos-user-login', pin),
+  posUsersHasAny: () => ipcRenderer.invoke('pos-users-has-any'),
+  /** Fired after main-process pulls pos_users from cloud. Returns unsubscribe. */
+  onPosUsersUpdated: (callback: (info: { count: number }) => void) => {
+    const handler = (_event: unknown, info: { count: number }) => callback(info);
+    ipcRenderer.on('pos-users-updated', handler);
+    return () => ipcRenderer.off('pos-users-updated', handler);
+  },
 });
 
 // Remove listeners on window unload

@@ -22,6 +22,7 @@ export interface ProductRow {
   categoryId: string;
   imageUrl: string | null;
   inStock: number; // SQLite uses 0/1 for boolean
+  /** Unused on POS; always 0. */
   stockQuantity: number;
   barcode: string | null;
   taxRate: number | null;

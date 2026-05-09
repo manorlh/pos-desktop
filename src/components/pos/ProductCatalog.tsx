@@ -22,9 +22,11 @@ export function ProductCatalog() {
   const { addItem } = useCartStore();
   const { t, locale } = useI18n();
 
+  const canSellProduct = (p: typeof filteredProducts[number]) => p.isAvailable !== false;
+
   const handleAddToCart = (productId: string) => {
-    const product = filteredProducts.find(p => p.id === productId);
-    if (product) {
+    const product = filteredProducts.find((p) => p.id === productId);
+    if (product && canSellProduct(product)) {
       addItem(product);
     }
   };
@@ -96,10 +98,15 @@ export function ProductCatalog() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))'
             }}
           >
-            {filteredProducts.map((product) => (
+            {filteredProducts.map((product) => {
+              const canSell = canSellProduct(product);
+              return (
               <Card 
                 key={product.id} 
-                className="cursor-pointer hover:shadow-md transition-shadow min-w-[120px]"
+                className={cn(
+                  'transition-shadow min-w-[120px]',
+                  canSell ? 'cursor-pointer hover:shadow-md' : 'opacity-55 cursor-not-allowed',
+                )}
                 onClick={() => handleAddToCart(product.id)}
               >
                 <CardContent className="p-2 sm:p-3 md:p-4">
@@ -110,13 +117,21 @@ export function ProductCatalog() {
                   <p className="text-xs text-muted-foreground mb-1 sm:mb-2 line-clamp-1 hidden sm:block">
                     {product.description}
                   </p>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {!canSell ? (
+                      <Badge variant="destructive" className="text-xs">
+                        {t('pos.notForSale')}
+                      </Badge>
+                    ) : !product.inStock ? (
+                      <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
+                        {t('pos.outOfStockShort')}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-primary text-xs sm:text-sm">
                       {formatCurrency(product.price, locale)}
                     </span>
-                    <Badge variant="secondary" className="text-xs">
-                      {product.stockQuantity}
-                    </Badge>
                   </div>
                   <div className="mt-1 sm:mt-2">
                     <Badge variant="outline" className="text-xs">
@@ -125,14 +140,19 @@ export function ProductCatalog() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );})}
           </div>
         ) : (
           <div className="space-y-2">
-            {filteredProducts.map((product) => (
+            {filteredProducts.map((product) => {
+              const canSell = canSellProduct(product);
+              return (
               <Card 
                 key={product.id} 
-                className="cursor-pointer hover:shadow-md transition-shadow"
+                className={cn(
+                  'transition-shadow',
+                  canSell ? 'cursor-pointer hover:shadow-md' : 'opacity-55 cursor-not-allowed',
+                )}
                 onClick={() => handleAddToCart(product.id)}
               >
                 <CardContent className="p-4">
@@ -145,13 +165,19 @@ export function ProductCatalog() {
                       <p className="text-sm text-muted-foreground mb-2">
                         {product.description}
                       </p>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="text-xs">
                           {categories.find(c => c.id === product.categoryId)?.name}
                         </Badge>
-                        <Badge variant="secondary" className="text-xs">
-                          {t('pos.stock')}: {product.stockQuantity}
-                        </Badge>
+                        {!canSell ? (
+                          <Badge variant="destructive" className="text-xs">
+                            {t('pos.notForSale')}
+                          </Badge>
+                        ) : !product.inStock ? (
+                          <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
+                            {t('pos.outOfStockShort')}
+                          </Badge>
+                        ) : null}
                       </div>
                     </div>
                     <div className="text-right">
@@ -165,7 +191,7 @@ export function ProductCatalog() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );})}
           </div>
         )}
 

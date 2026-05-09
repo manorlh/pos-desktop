@@ -10,12 +10,14 @@ import {
   FileText,
   Sun,
   Moon,
-  X
+  X,
+  LogOut
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { useI18n } from '@/i18n';
 import { useTradingDayStore } from '@/stores/useTradingDayStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { OpenDayDialog } from '../trading-day/OpenDayDialog';
 import { CloseDayDialog } from '../trading-day/CloseDayDialog';
 import { ZReportDialog } from '../trading-day/ZReportDialog';
@@ -32,10 +34,16 @@ interface SidebarProps {
 export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: SidebarProps) {
   const { t } = useI18n();
   const { isDayOpen } = useTradingDayStore();
+  const posUser = useAuthStore((s) => s.posUser);
+  const logout = useAuthStore((s) => s.logout);
   const [openDayDialogOpen, setOpenDayDialogOpen] = useState(false);
   const [closeDayDialogOpen, setCloseDayDialogOpen] = useState(false);
   const [zReportDialogOpen, setZReportDialogOpen] = useState(false);
   const [closedTradingDay, setClosedTradingDay] = useState<TradingDay | null>(null);
+
+  const cashierName = posUser
+    ? [posUser.firstName, posUser.lastName].filter(Boolean).join(' ').trim() || posUser.username
+    : '—';
   
   const navigation = [
     { id: 'pos' as ViewType, name: t('nav.pos'), icon: ShoppingCart },
@@ -146,11 +154,22 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
         tradingDay={closedTradingDay}
       />
       
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border space-y-2">
         <div className="text-sm text-muted-foreground">
-          <p>{t('header.cashier')}: John Doe</p>
+          <p>{t('header.cashier')}: {cashierName}</p>
           <p>{t('header.store')} #001</p>
         </div>
+        {posUser && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-destructive hover:text-destructive"
+            onClick={logout}
+          >
+            <LogOut className="h-4 w-4" />
+            <span>{t('login.logout')}</span>
+          </Button>
+        )}
       </div>
     </aside>
   );

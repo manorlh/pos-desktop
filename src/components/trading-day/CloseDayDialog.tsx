@@ -72,7 +72,16 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
         onClose(closedDay);
       }, 100);
     } catch (err: any) {
-      setError(err.message || 'Failed to close trading day');
+      const raw = (err && err.message) ? String(err.message) : 'Failed to close trading day';
+      // Translate machine-readable codes thrown by the store / IPC barrier.
+      let translated = raw;
+      if (raw === 'z-close.pending-transactions-exist') {
+        translated = t('zClose.pendingTransactionsExist');
+      } else if (raw.startsWith('z-close.cloud-required')) {
+        const detail = raw.slice('z-close.cloud-required:'.length);
+        translated = t('zClose.cloudRequired') + (detail ? ` (${detail})` : '');
+      }
+      setError(translated);
       setIsLoading(false);
     }
   };

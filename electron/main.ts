@@ -6,6 +6,9 @@ const iconv = require('iconv-lite');
 const crypto = require('crypto');
 
 import { syncService } from './syncService';
+import { transactionSyncService } from './transactionSync';
+import { posUserSyncService } from './posUserSync';
+import { authService } from './auth';
 import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate } from './cloudPairing';
 
 import {
@@ -140,6 +143,7 @@ function createSchema(db: any): void {
       categoryId TEXT NOT NULL,
       imageUrl TEXT,
       inStock INTEGER NOT NULL DEFAULT 1,
+      isAvailable INTEGER NOT NULL DEFAULT 1,
       stockQuantity INTEGER NOT NULL DEFAULT 0,
       barcode TEXT,
       taxRate REAL,
@@ -236,6 +240,18 @@ function createSchema(db: any): void {
     // Column already exists
   }
 
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN tradingDayId TEXT REFERENCES trading_days(id)`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN syncedAt TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
   // Transaction items table
   db.exec(`
     CREATE TABLE IF NOT EXISTS transaction_items (
@@ -307,6 +323,22 @@ function createSchema(db: any): void {
     )
   `);
 
+  // Outbox for cloud sync of transactions and Z-reports.
+  // Idempotent on the wire: server upserts by tx id and returns 'duplicate' on retry.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tx_outbox (
+      id TEXT PRIMARY KEY,
+      transactionId TEXT,
+      kind TEXT NOT NULL CHECK (kind IN ('tx', 'z_report')),
+      payload TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      lastError TEXT,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'syncing', 'synced', 'failed')) DEFAULT 'pending',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
   // Trading days table
   db.exec(`
     CREATE TABLE IF NOT EXISTS trading_days (
@@ -330,6 +362,25 @@ function createSchema(db: any): void {
     )
   `);
 
+  // POS users (synced from cloud, scoped to this machine's shop). Carries the bcrypt
+  // PIN hash so cashiers can log in fully offline.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pos_users (
+      id TEXT PRIMARY KEY,
+      shopId TEXT NOT NULL,
+      username TEXT NOT NULL,
+      firstName TEXT,
+      lastName TEXT,
+      workerNumber TEXT,
+      pinHash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      syncedAt TEXT
+    )
+  `);
+
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transactions_createdAt ON transactions(createdAt);
@@ -341,6 +392,11 @@ function createSchema(db: any): void {
     CREATE INDEX IF NOT EXISTS idx_trading_days_dayDate ON trading_days(dayDate);
     CREATE INDEX IF NOT EXISTS idx_trading_days_status ON trading_days(status);
     CREATE INDEX IF NOT EXISTS idx_integration_logs_type_created ON integration_logs(type, createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_tx_outbox_status ON tx_outbox(status, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_transactions_tradingDayId ON transactions(tradingDayId);
+    CREATE INDEX IF NOT EXISTS idx_transactions_syncedAt ON transactions(syncedAt);
+    CREATE INDEX IF NOT EXISTS idx_pos_users_shop_active ON pos_users(shopId, isActive);
+    CREATE INDEX IF NOT EXISTS idx_pos_users_username ON pos_users(shopId, username);
   `);
 }
 
@@ -365,6 +421,9 @@ function initializeDatabaseMain(dbPath: string): any {
   
   createSchema(dbInstance);
   syncService.init(dbInstance);
+  transactionSyncService.init(dbInstance);
+  posUserSyncService.init(dbInstance);
+  authService.init(dbInstance);
   tryReconnectCloudMqttFromDb(dbInstance);
 
   return dbInstance;
@@ -422,7 +481,9 @@ function getAllProducts(db: any): any[] {
     categoryId: row.categoryId,
     imageUrl: row.imageUrl || undefined,
     inStock: row.inStock === 1,
-    stockQuantity: row.stockQuantity,
+    isAvailable: row.isAvailable === undefined ? true : row.isAvailable === 1,
+    shopListed: row.shopListed === undefined || row.shopListed === null ? true : row.shopListed === 1,
+    stockQuantity: 0,
     barcode: row.barcode || undefined,
     taxRate: row.taxRate || undefined,
     createdAt: row.createdAt,
@@ -435,8 +496,8 @@ function getAllProducts(db: any): any[] {
 function saveProduct(db: any, product: any): void {
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO products 
-    (id, name, description, price, sku, categoryId, imageUrl, inStock, stockQuantity, barcode, taxRate, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, name, description, price, sku, categoryId, imageUrl, inStock, isAvailable, stockQuantity, barcode, taxRate, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   stmt.run(
@@ -448,7 +509,8 @@ function saveProduct(db: any, product: any): void {
     product.categoryId,
     product.imageUrl || null,
     product.inStock ? 1 : 0,
-    product.stockQuantity,
+    product.isAvailable === false ? 0 : 1,
+    0,
     product.barcode || null,
     product.taxRate || null,
     product.createdAt,
@@ -505,21 +567,32 @@ function isCloudSyncEnabledMain(db: any): boolean {
   return v === '1' || v === 'true';
 }
 
-/** Restore MQTT + sync config from SQLite after restart (sync-connect is only called during pairing). */
-function tryReconnectCloudMqttFromDb(db: any): void {
-  if (!isCloudSyncEnabledMain(db)) return;
+/**
+ * Periodic poller that asks the cloud "what's my merchant assignment?" while
+ * we're paired but not yet assigned. Cleared as soon as we get an answer.
+ *
+ * Scenario: operator pairs the POS to a fresh machine that has no merchant
+ * yet, then later assigns it via the dashboard. Without this poller we'd stay
+ * stuck logging "no merchantId in settings" until the operator manually hits
+ * the "Refresh merchant" button in Settings.
+ */
+let merchantAssignmentPoll: NodeJS.Timeout | null = null;
+
+function _doConnectMqttFromSettings(db: any): boolean {
   const host = readSettingMain(db, 'mqtt_cloud_host');
   const portStr = readSettingMain(db, 'mqtt_cloud_port');
   const merchantId = readSettingMain(db, 'cloud_merchant_id');
   const machineId = readSettingMain(db, 'cloud_machine_id');
   const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
   const accessToken = readSettingMain(db, 'cloud_access_token');
-  if (!host?.trim() || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
-    return;
-  }
-  if (!merchantId?.trim()) {
-    console.warn('[Cloud] MQTT reconnect skipped — no merchantId in settings');
-    return;
+  if (
+    !host?.trim() ||
+    !merchantId?.trim() ||
+    !machineId?.trim() ||
+    !apiBaseUrl?.trim() ||
+    !accessToken?.trim()
+  ) {
+    return false;
   }
   const port = portStr ? parseInt(portStr, 10) : 1883;
   const clientId = readSettingMain(db, 'mqtt_cloud_client_id');
@@ -539,9 +612,105 @@ function tryReconnectCloudMqttFromDb(db: any): void {
       password: password || undefined,
     });
     console.log('[Cloud] MQTT reconnect attempted from stored settings');
+    return true;
   } catch (e) {
     console.error('[Cloud] MQTT reconnect from DB failed:', e);
+    return false;
   }
+}
+
+/**
+ * One-shot fetch of /machines/me. Persists `cloud_merchant_id` (and
+ * `cloud_shop_id` if we ever start using it) when the cloud reports an
+ * assignment.
+ */
+function _fetchMerchantContext(
+  db: any,
+  cb: (got: { merchantId: string | null; shopId: string | null } | null) => void,
+): void {
+  syncService.init(db);
+  syncService.cloudJson('GET', '/machines/me', null, (err, _status, data) => {
+    if (err) {
+      console.warn('[Cloud] /machines/me fetch failed:', err.message);
+      return cb(null);
+    }
+    const d = (data ?? {}) as Record<string, string | null | undefined>;
+    const merchantId = d.merchantId ? String(d.merchantId) : null;
+    const shopId = d.shopId ? String(d.shopId) : null;
+    if (merchantId) {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+        'cloud_merchant_id',
+        merchantId,
+      );
+      console.log('[Cloud] /machines/me → merchantId=', merchantId, 'shopId=', shopId ?? '(none)');
+    }
+    cb({ merchantId, shopId });
+  });
+}
+
+/**
+ * Restore MQTT + sync config from SQLite after restart (sync-connect is only
+ * called during pairing). Self-heals when the machine has been paired but the
+ * merchant assignment hasn't reached the local DB yet:
+ *
+ *   1. If `cloud_merchant_id` is missing, ping `/machines/me` once.
+ *   2. If the cloud now reports a merchant, persist it and connect MQTT.
+ *   3. Otherwise schedule a periodic re-check every 30s until we either get
+ *      an assignment, the operator unpairs, or the app exits.
+ */
+function tryReconnectCloudMqttFromDb(db: any): void {
+  if (!isCloudSyncEnabledMain(db)) return;
+  const host = readSettingMain(db, 'mqtt_cloud_host');
+  const machineId = readSettingMain(db, 'cloud_machine_id');
+  const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
+  const accessToken = readSettingMain(db, 'cloud_access_token');
+  if (!host?.trim() || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
+    // Not paired yet (or unpaired). Nothing to reconnect; if a polling timer
+    // was running from a previous pairing, cancel it.
+    if (merchantAssignmentPoll) {
+      clearInterval(merchantAssignmentPoll);
+      merchantAssignmentPoll = null;
+    }
+    return;
+  }
+
+  const merchantId = readSettingMain(db, 'cloud_merchant_id');
+  if (merchantId?.trim()) {
+    _doConnectMqttFromSettings(db);
+    if (merchantAssignmentPoll) {
+      clearInterval(merchantAssignmentPoll);
+      merchantAssignmentPoll = null;
+    }
+    return;
+  }
+
+  // Paired but unassigned — try to self-heal once immediately, then on a slow
+  // poll. This is the path that previously logged "MQTT reconnect skipped —
+  // no merchantId in settings" and gave up.
+  console.log('[Cloud] No merchantId yet — fetching /machines/me to check for assignment');
+  _fetchMerchantContext(db, (got) => {
+    if (got?.merchantId) {
+      _doConnectMqttFromSettings(db);
+      if (merchantAssignmentPoll) {
+        clearInterval(merchantAssignmentPoll);
+        merchantAssignmentPoll = null;
+      }
+      return;
+    }
+    if (merchantAssignmentPoll) return; // already polling
+    console.log('[Cloud] Machine not assigned yet — will recheck every 30s');
+    merchantAssignmentPoll = setInterval(() => {
+      _fetchMerchantContext(db, (g) => {
+        if (g?.merchantId) {
+          if (merchantAssignmentPoll) {
+            clearInterval(merchantAssignmentPoll);
+            merchantAssignmentPoll = null;
+          }
+          _doConnectMqttFromSettings(db);
+        }
+      });
+    }, 30000);
+  });
 }
 
 function productToCloudPostPayload(product: any): Record<string, unknown> {
@@ -553,7 +722,8 @@ function productToCloudPostPayload(product: any): Record<string, unknown> {
     categoryId: product.categoryId,
     imageUrl: product.imageUrl ?? null,
     inStock: !!product.inStock,
-    stockQuantity: Number(product.stockQuantity || 0),
+    isAvailable: product.isAvailable !== false,
+    stockQuantity: 0,
     barcode: product.barcode ?? null,
     taxRate: product.taxRate != null ? Number(product.taxRate) : null,
     catalogLevel: 'global',
@@ -569,7 +739,8 @@ function productToCloudPutPayload(product: any): Record<string, unknown> {
     categoryId: product.categoryId,
     imageUrl: product.imageUrl ?? null,
     inStock: !!product.inStock,
-    stockQuantity: Number(product.stockQuantity || 0),
+    isAvailable: product.isAvailable !== false,
+    stockQuantity: 0,
     barcode: product.barcode ?? null,
     taxRate: product.taxRate != null ? Number(product.taxRate) : null,
   };
@@ -838,12 +1009,18 @@ function getTransactionsPage(db: any, options: any): { transactions: any[]; tota
 
 function saveTransaction(db: any, transaction: any): void {
   const trans = db.transaction(() => {
+    // Resolve current open trading day so the cloud can group transactions per shift.
+    const openDay = db.prepare("SELECT id FROM trading_days WHERE status = 'open' ORDER BY openedAt DESC").get() as
+      | { id: string }
+      | undefined;
+    const tradingDayId = transaction.tradingDayId || (openDay ? openDay.id : null);
+
     // Save transaction
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, tradingDayId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -864,6 +1041,7 @@ function saveTransaction(db: any, transaction: any): void {
       transaction.refundOfTransactionId || null,
       transaction.paymentMethod || null,
       transaction.nayaxMeta || null,
+      tradingDayId,
       transaction.createdAt,
       transaction.updatedAt
     );
@@ -892,33 +1070,6 @@ function saveTransaction(db: any, transaction: any): void {
         item.lineDiscount || null,
         item.notes || null
       );
-    }
-    
-    // Update product stock: refunds increase stock, completed sales decrease stock
-    if (transaction.status === 'completed') {
-      const isRefund = Boolean(transaction.refundOfTransactionId);
-      for (const item of transaction.cart.items) {
-        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId);
-        if (product) {
-          const currentStock = product.stockQuantity;
-          const newStockQuantity = isRefund
-            ? currentStock + item.quantity
-            : Math.max(0, currentStock - item.quantity);
-          const updateProductStock = db.prepare(`
-            UPDATE products 
-            SET stockQuantity = ?,
-                inStock = ?,
-                updatedAt = ?
-            WHERE id = ?
-          `);
-          updateProductStock.run(
-            newStockQuantity,
-            newStockQuantity > 0 ? 1 : 0,
-            new Date().toISOString(),
-            item.productId
-          );
-        }
-      }
     }
   });
   
@@ -1209,10 +1360,14 @@ function loadTradingDayWithRelations(db: any, row: any): any {
   };
 }
 
+/** Local calendar YYYY-MM-DD (store business day consistently; avoid UTC shift from toISOString). */
+function localCalendarYMD(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function getCurrentTradingDay(db: any): any | null {
-  const today = new Date();
-  const dayDate = today.toISOString().split('T')[0]; // YYYY-MM-DD
-  
+  const dayDate = localCalendarYMD(new Date());
+
   const row = db.prepare('SELECT * FROM trading_days WHERE dayDate = ? AND status = ?').get(dayDate, 'open');
   if (!row) return null;
   
@@ -1223,6 +1378,12 @@ function getTradingDayByDate(db: any, date: string): any | null {
   const row = db.prepare('SELECT * FROM trading_days WHERE dayDate = ?').get(date);
   if (!row) return null;
   
+  return loadTradingDayWithRelations(db, row);
+}
+
+function getTradingDayById(db: any, id: string): any | null {
+  const row = db.prepare('SELECT * FROM trading_days WHERE id = ?').get(id);
+  if (!row) return null;
   return loadTradingDayWithRelations(db, row);
 }
 
@@ -1244,8 +1405,8 @@ function openTradingDay(db: any, data: any): void {
   `);
   
   const now = new Date().toISOString();
-  const dayDate = new Date().toISOString().split('T')[0];
-  
+  const dayDate = localCalendarYMD(new Date());
+
   stmt.run(
     data.id,
     dayDate,
@@ -2273,6 +2434,16 @@ ipcMain.handle('db-save-transaction', async (event, transaction: any) => {
       documentProductionDate: transaction.documentProductionDate || new Date().toISOString(),
     };
     saveTransaction(db, tx);
+
+    // Real-time push: enqueue + nudge a flush. Skip business-pending rows (card capture in flight).
+    if (tx.status && tx.status !== 'pending') {
+      try {
+        transactionSyncService.enqueueTransaction(tx.id);
+      } catch (e) {
+        console.error('[TxSync] enqueue after save failed', e);
+      }
+    }
+
     return { success: true };
   } catch (error: any) {
     console.error('Error saving transaction:', error);
@@ -2284,10 +2455,113 @@ ipcMain.handle('db-update-transaction-status', async (event, transactionId: stri
   try {
     const db = getDatabaseMain();
     updateTransactionStatus(db, transactionId, status);
+    if (status && status !== 'pending') {
+      try {
+        transactionSyncService.enqueueTransaction(transactionId);
+      } catch (e) {
+        console.error('[TxSync] enqueue after status update failed', e);
+      }
+    }
     return { success: true };
   } catch (error: any) {
     console.error('Error updating transaction status:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// ── Cloud sync: outbox stats + manual flush + Z-close cloud barrier ────────────
+
+ipcMain.handle('cloud-sync-stats', async () => {
+  try {
+    return { success: true, ...transactionSyncService.getStats() };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud-sync-flush', async () => {
+  try {
+    const r = await transactionSyncService.flushOutbox();
+    return { success: r.ok, flushed: r.flushed, error: r.reason };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/** Renderer signals it just observed `online` — drain the outbox right away. */
+ipcMain.handle('cloud-sync-online-hint', async () => {
+  try {
+    transactionSyncService.scheduleFlush();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Hard barrier Z-close. Renderer passes the full Z payload + the list of expected
+ * transaction ids so the server can verify nothing is missing.
+ *
+ * Returns:
+ *   { success: true, status: 'accepted'|'duplicate' }  → renderer can write trading_days locally + purge
+ *   { success: false, error }                           → leave day open, surface error
+ */
+ipcMain.handle('cloud-z-close', async (_event, zPayload: Record<string, unknown>) => {
+  try {
+    const r = await transactionSyncService.closeDayWithCloud(zPayload);
+    if (r.ok) return { success: true, status: r.status };
+    return { success: false, error: r.error, missingIds: r.missingIds, httpStatus: r.httpStatus };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/** Purge a closed day's local transactions (called after successful Z save). */
+ipcMain.handle('cloud-purge-closed-day', async (_event, tradingDayId: string) => {
+  try {
+    const r = transactionSyncService.purgeClosedDay(tradingDayId);
+    return { success: true, deleted: r.deleted };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ── POS users (sync + auth) ───────────────────────────────────────────────────
+
+/** Renderer-triggered "Sync now" for pos users (Settings, Onboarding). */
+ipcMain.handle('pos-users-sync-now', async () => {
+  try {
+    const r = await posUserSyncService.pullPosUsersImmediate();
+    return r;
+  } catch (error: any) {
+    return { ok: false, error: error.message };
+  }
+});
+
+/** Tile-grid data for the login screen. Never includes pinHash. */
+ipcMain.handle('pos-users-list-for-shop', async () => {
+  try {
+    return { success: true, users: authService.listForCurrentShop() };
+  } catch (error: any) {
+    return { success: false, error: error.message, users: [] };
+  }
+});
+
+/** Verify a PIN locally. */
+ipcMain.handle('pos-user-login', async (_event, pin: string) => {
+  try {
+    return authService.verifyPin(String(pin || ''));
+  } catch (error: any) {
+    return { ok: false, reason: 'invalid_pin' as const, error: error.message };
+  }
+});
+
+/** Onboarding gate: do we have at least one active POS user locally? */
+ipcMain.handle('pos-users-has-any', async () => {
+  try {
+    return { success: true, hasAny: posUserSyncService.hasAnyActive() };
+  } catch (error: any) {
+    return { success: false, hasAny: false, error: error.message };
   }
 });
 
@@ -2699,6 +2973,16 @@ ipcMain.handle('db-get-trading-day-by-date', async (event, date: string) => {
   }
 });
 
+ipcMain.handle('db-get-trading-day-by-id', async (_event, id: string) => {
+  try {
+    const db = getDatabaseMain();
+    return getTradingDayById(db, id);
+  } catch (error: any) {
+    console.error('Error getting trading day by id:', error);
+    return null;
+  }
+});
+
 ipcMain.handle('db-get-trading-days-by-date-range', async (event, startDate: string, endDate: string) => {
   try {
     const db = getDatabaseMain();
@@ -2784,6 +3068,7 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     if (config.apiBaseUrl) put('cloud_api_base', String(config.apiBaseUrl));
     if (config.accessToken) put('cloud_access_token', String(config.accessToken));
     if (config.machineId) put('cloud_machine_id', String(config.machineId));
+    if (config.machineCode) put('cloud_machine_code', String(config.machineCode));
     if (config.merchantId != null) put('cloud_merchant_id', String(config.merchantId || ''));
     put('cloud_sync_enabled', '1');
     if (config.host) put('mqtt_cloud_host', String(config.host));
@@ -2826,6 +3111,52 @@ ipcMain.handle('sync-disconnect', async () => {
     return { success: true };
   } catch (error: any) {
     console.error('[IPC] sync-disconnect error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Hard reset of cloud pairing. Used by the onboarding "Re-pair this register"
+ * flow when the operator wants to bind this machine to a different shop or
+ * fix an incorrect pairing. Disconnects MQTT, wipes all cloud_* / mqtt_cloud_*
+ * settings, and clears the local pos_users roster so the next pairing pulls a
+ * fresh roster for the new shop.
+ */
+ipcMain.handle('cloud-unpair', async () => {
+  try {
+    // Cancel the merchant-assignment poller in case we were paired-but-unassigned
+    // and the operator decided to unpair before the cloud assigned a merchant.
+    if (merchantAssignmentPoll) {
+      clearInterval(merchantAssignmentPoll);
+      merchantAssignmentPoll = null;
+    }
+    syncService.disconnect();
+    const db = getDatabaseMain();
+    const clear = (key: string) =>
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, '');
+    const cloudKeys = [
+      'cloud_sync_enabled',
+      'cloud_api_base',
+      'cloud_access_token',
+      'cloud_machine_id',
+      'cloud_machine_code',
+      'cloud_merchant_id',
+      'mqtt_cloud_host',
+      'mqtt_cloud_port',
+      'mqtt_cloud_client_id',
+      'mqtt_cloud_username',
+      'mqtt_cloud_password',
+    ];
+    for (const k of cloudKeys) clear(k);
+    // Drop sync watermarks so a re-pair to a different shop / machine starts
+    // from a clean slate. Keeping the old `cloud_last_*` values would make
+    // the next delta pull skip rows the new shop's roster needs (the bug
+    // surfaced as "0 users" in the onboarding wizard after re-pairing).
+    db.prepare("DELETE FROM settings WHERE key IN ('cloud_last_sync', 'cloud_last_pos_users_sync')").run();
+    db.prepare('DELETE FROM pos_users').run();
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] cloud-unpair error:', error);
     return { success: false, error: error.message };
   }
 });

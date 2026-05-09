@@ -26,7 +26,7 @@ interface SettingsStore {
 export const useSettingsStore = create<SettingsStore>((set) => ({
   virtualKeyboardEnabled: true, // Default to enabled
   globalTaxRate: 0.18, // Israel standard VAT 18%
-  hideOutOfStockProducts: true, // Default to hiding out of stock products
+  hideOutOfStockProducts: false,
   language: 'he', // Default to Hebrew
   nayaxEnabled: false,
   nayaxDeviceHost: '',
@@ -49,7 +49,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
         set({
           virtualKeyboardEnabled: enabled === null ? true : enabled === 'true',
           globalTaxRate: taxRateStr === null ? 0.18 : parseFloat(taxRateStr) / 100, // Convert percentage to decimal
-          hideOutOfStockProducts: hideOutOfStock === null ? true : hideOutOfStock === 'true',
+          hideOutOfStockProducts: hideOutOfStock === null ? false : hideOutOfStock === 'true',
           language: (language === 'en' || language === 'he') ? language : 'he',
           nayaxEnabled: nayaxEnabled === 'true',
           nayaxDeviceHost: nayaxDeviceHost ?? '',

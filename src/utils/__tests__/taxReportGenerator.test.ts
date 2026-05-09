@@ -36,7 +36,7 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     sku: 'TST-001',
     categoryId: 'cat-1',
     inStock: true,
-    stockQuantity: 100,
+    stockQuantity: 0,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

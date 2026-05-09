@@ -104,7 +104,11 @@ export function RefundDialog({ open, onOpenChange, transaction, onSuccess }: Ref
       onSuccess?.();
       onOpenChange(false);
     } catch (e: any) {
-      setError(e?.message ?? 'Refund failed');
+      const raw = e?.message ?? 'Refund failed';
+      const translated = raw === 'refund.cross-day-not-supported'
+        ? t('refund.crossDayNotSupported')
+        : raw;
+      setError(translated);
     } finally {
       setIsSubmitting(false);
     }

@@ -47,6 +47,8 @@ export const he = {
     items: 'פריטים',
     each: 'כל אחד',
     stock: 'מלאי',
+    notForSale: 'לא זמין למכירה',
+    outOfStockShort: 'אזל מהמלאי',
   },
   
   // Checkout
@@ -271,7 +273,7 @@ export const he = {
     virtualKeyboardDesc: 'הפעל מקלדת וירטואלית למכשירי מגע',
     virtualKeyboardTouchDesc: 'הפעל או כבה מקלדת וירטואלית לקלט מגע',
     hideOutOfStock: 'הסתר מוצרים אזלו מהמלאי',
-    hideOutOfStockDesc: 'הסתר מוצרים עם מלאי אפס מקטלוג המוצרים',
+    hideOutOfStockDesc: 'הסתר מוצרים כשהקטלוג בענן מסמן שאינם במלאי.',
     language: 'שפה',
     languageDesc: 'בחר שפת אפליקציה',
     languageHebrew: 'עברית',
@@ -437,6 +439,59 @@ export const he = {
     invalidCashAmount: 'סכום מזומן חייב להיות מספר חיובי תקין',
     dayOpenedSuccess: 'יום מסחר נפתח בהצלחה',
     dayClosedSuccess: 'יום מסחר נסגר בהצלחה',
+  },
+  zClose: {
+    pendingTransactionsExist: 'השלם או בטל עסקאות ממתינות לפני סגירת היום',
+    cloudRequired: 'המתן לחיבור לענן כדי לסגור יום',
+  },
+  refund: {
+    crossDayNotSupported: 'החזר עסקה מימים קודמים אינו נתמך בגרסה זו',
+  },
+
+  // Login screen
+  login: {
+    title: 'התחברות לקופה',
+    subtitle: 'בחר משתמש והקלד PIN',
+    cashiers: 'משתמשים',
+    enterPin: 'הזן PIN',
+    submit: 'התחבר',
+    clear: 'נקה',
+    logout: 'התנתק',
+    invalidPin: 'PIN שגוי',
+    invalidFormat: 'PIN חייב להיות 4-6 ספרות',
+    noUsers: 'לא קיימים משתמשי POS — סנכרן עם הענן',
+    role: {
+      cashier: 'קופאי',
+      shop_manager: 'מנהל סניף',
+    },
+  },
+
+  // Onboarding wizard
+  onboarding: {
+    title: 'התחלה ראשונה',
+    subtitle: 'חבר את הקופה לענן וסנכרן את משתמשי הקופה כדי להתחיל',
+    step1Title: 'התאמת הקופה לענן',
+    step2Title: 'סנכרון משתמשי הקופה',
+    step2Hint: 'משתמשי הקופה יורדים מהענן ונשמרים מקומית להתחברות גם בלי אינטרנט.',
+    step2Locked: 'יש לסיים שלב 1 קודם.',
+    step2Done: 'משתמשים סונכרנו בהצלחה.',
+    apiBase: 'כתובת השרת',
+    pairingCode: 'קוד התאמה',
+    machineName: 'שם המכשיר',
+    machineNamePlaceholder: 'אופציונלי, לדוגמה: קופה ראשית',
+    pairBtn: 'התאם',
+    pairingFailed: 'התאמה נכשלה',
+    pairingOk: 'הקופה הותאמה בהצלחה',
+    syncUsersBtn: 'סנכרן עכשיו',
+    syncUsersOk: 'סונכרנו {count} משתמשים',
+    syncUsersFailed: 'סנכרון משתמשים נכשל',
+    pairedSummary: 'הקופה כבר מחוברת לענן',
+    machineCodeLabel: 'קוד מכשיר',
+    repairBtn: 'התאם מחדש',
+    repairConfirm: 'התאמה מחדש תנתק את הקופה ותמחק את משתמשי הקופה המקומיים. להמשיך?',
+    repairing: 'מנתק...',
+    syncReturnedZero:
+      'לא נמצאו משתמשי קופה פעילים בענן עבור החנות הזו. צרו משתמשי קופה בלוח הבקרה (חנויות ▸ משתמשי קופה) ואז סנכרנו שוב.',
   },
 };
 

@@ -128,11 +128,16 @@ export class CloudMqttClient {
     if (!this.config || !this.client) return;
     const { merchantId, machineId } = this.config;
 
-    const topic = `pos/${merchantId}/${machineId}/catalog/notify`;
-    this.client.subscribe(topic, { qos: 1 }, (err: Error | null) => {
-      if (err) console.error('[MQTT] Subscribe error on', topic, err.message);
-      else console.log('[MQTT] Subscribed:', topic);
-    });
+    const topics = [
+      `pos/${merchantId}/${machineId}/catalog/notify`,
+      `pos/${merchantId}/${machineId}/pos-users/notify`,
+    ];
+    for (const topic of topics) {
+      this.client.subscribe(topic, { qos: 1 }, (err: Error | null) => {
+        if (err) console.error('[MQTT] Subscribe error on', topic, err.message);
+        else console.log('[MQTT] Subscribed:', topic);
+      });
+    }
   }
 }
 

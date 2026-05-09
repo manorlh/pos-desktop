@@ -65,7 +65,7 @@ export function getAllProducts(db: any): Product[] {
     categoryId: row.categoryId,
     imageUrl: row.imageUrl || undefined,
     inStock: row.inStock === 1,
-    stockQuantity: row.stockQuantity,
+    stockQuantity: 0,
     barcode: row.barcode || undefined,
     taxRate: row.taxRate || undefined,
     createdAt: new Date(row.createdAt),
@@ -89,7 +89,7 @@ export function saveProduct(db: any, product: Product): void {
     product.categoryId,
     product.imageUrl || null,
     product.inStock ? 1 : 0,
-    product.stockQuantity,
+    0,
     product.barcode || null,
     product.taxRate || null,
     product.createdAt.toISOString(),
@@ -354,34 +354,7 @@ export function saveTransaction(db: any, transaction: Transaction): void {
         item.transactionType || null,
         item.lineDiscount || null,
         item.notes || null
-      );
-    }
-    
-    // Update product stock: refunds increase stock, completed sales decrease stock
-    if (transaction.status === 'completed') {
-      const isRefund = Boolean(transaction.refundOfTransactionId);
-      for (const item of transaction.cart.items) {
-        const product = db.prepare('SELECT stockQuantity FROM products WHERE id = ?').get(item.productId) as { stockQuantity: number } | undefined;
-        if (product) {
-          const currentStock = product.stockQuantity;
-          const newStockQuantity = isRefund
-            ? currentStock + item.quantity
-            : Math.max(0, currentStock - item.quantity);
-          const updateProductStock = db.prepare(`
-            UPDATE products 
-            SET stockQuantity = ?,
-                inStock = ?,
-                updatedAt = ?
-            WHERE id = ?
-          `);
-          updateProductStock.run(
-            newStockQuantity,
-            newStockQuantity > 0 ? 1 : 0,
-            new Date().toISOString(),
-            item.productId
-          );
-        }
-      }
+        );
     }
   });
   

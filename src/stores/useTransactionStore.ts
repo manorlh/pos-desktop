@@ -536,8 +536,19 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
   ): Promise<Transaction> => {
     const { currentUser, generateTransactionNumber } = get();
     if (!currentUser) throw new Error('No user logged in');
-    const { isDayOpen } = useTradingDayStore.getState();
+    const { isDayOpen, currentTradingDay } = useTradingDayStore.getState();
     if (!isDayOpen) throw new Error('Cannot process refund: Day is closed');
+
+    // Cross-day refunds are out of scope for this PR — original tx may already have
+    // been purged after Z-close. Allow only same-day refunds.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const origDay = new Date(originalTransaction.createdAt).toISOString().slice(0, 10);
+    const isSameDay = origDay === todayStr && currentTradingDay
+      ? new Date(originalTransaction.createdAt) >= currentTradingDay.openedAt
+      : origDay === todayStr;
+    if (!isSameDay) {
+      throw new Error('refund.cross-day-not-supported');
+    }
 
     let items: CartItem[];
     if (options.fullRefund) {

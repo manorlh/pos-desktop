@@ -99,9 +99,12 @@ export const useProductStore = create<ProductStore>((set, get) => ({
       );
     }
 
-    // Filter out-of-stock products only if setting is enabled
+    // Delisted for this shop (cloud assortment) — never show on till
+    filtered = filtered.filter((product) => product.shopListed !== false);
+
+    // Hide catalog rows cloud marks as not in stock (merchandising — not quantity).
     if (hideOutOfStock) {
-      filtered = filtered.filter(product => product.inStock && product.stockQuantity > 0);
+      filtered = filtered.filter((product) => product.inStock);
     }
 
     set({ filteredProducts: filtered });
@@ -216,6 +219,8 @@ export const useProductStore = create<ProductStore>((set, get) => ({
         const products = await window.electronAPI.dbGetProducts();
         const productsWithDates = products.map((p: any) => ({
           ...p,
+          isAvailable: p.isAvailable !== false,
+          shopListed: p.shopListed !== false,
           createdAt: new Date(p.createdAt),
           updatedAt: new Date(p.updatedAt),
         }));

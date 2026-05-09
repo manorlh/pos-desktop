@@ -137,6 +137,7 @@ interface ElectronAPI {
   // Trading day operations
   dbGetCurrentTradingDay: () => Promise<any | null>;
   dbGetTradingDayByDate: (date: string) => Promise<any | null>;
+  dbGetTradingDayById: (id: string) => Promise<any | null>;
   dbGetTradingDaysByDateRange: (startDate: string, endDate: string) => Promise<any[]>;
   dbOpenTradingDay: (data: any) => Promise<{ success: boolean; error?: string }>;
   dbCloseTradingDay: (id: string, data: any) => Promise<{ success: boolean; error?: string }>;
@@ -174,6 +175,7 @@ interface ElectronAPI {
     accessToken: string;
     machineId: string;
     merchantId?: string;
+    machineCode?: string;
     host: string;
     port: number;
     clientId?: string;
@@ -181,6 +183,8 @@ interface ElectronAPI {
     password?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   syncDisconnect: () => Promise<{ success: boolean; error?: string }>;
+  /** Hard reset of cloud pairing: disconnects MQTT, wipes cloud_* settings, and clears local pos_users. */
+  cloudUnpair: () => Promise<{ success: boolean; error?: string }>;
   syncGetStatus: () => Promise<
     { success: true; status: { enabled: boolean; connected: boolean; pendingCount: number; lastSyncedAt: string | null } } | { success: false; error?: string }
   >;
@@ -196,6 +200,66 @@ interface ElectronAPI {
   >;
   syncEnqueue: (data: unknown) => Promise<{ success: boolean; error?: string }>;
   syncFlushQueue: () => Promise<{ success: boolean; error?: string }>;
+
+  // Cloud transaction sync (real-time push + Z-close hard barrier)
+  cloudSyncStats: () => Promise<{
+    success: boolean;
+    pending?: number;
+    syncing?: number;
+    failed?: number;
+    failedRows?: Array<{
+      id: string;
+      transactionId: string | null;
+      lastError: string | null;
+      attempts: number;
+      updatedAt: string;
+    }>;
+    error?: string;
+  }>;
+  cloudSyncFlush: () => Promise<{ success: boolean; flushed?: number; error?: string }>;
+  cloudSyncOnlineHint: () => Promise<{ success: boolean; error?: string }>;
+  cloudZClose: (zPayload: Record<string, unknown>) => Promise<
+    | { success: true; status: 'accepted' | 'duplicate' }
+    | { success: false; error: string; missingIds?: string[]; httpStatus?: number }
+  >;
+  cloudPurgeClosedDay: (
+    tradingDayId: string,
+  ) => Promise<{ success: boolean; deleted?: number; error?: string }>;
+
+  // POS users (per-shop cashier roster)
+  posUsersSyncNow: () => Promise<{ ok: boolean; error?: string; users?: number }>;
+  posUserListForShop: () => Promise<{
+    success: boolean;
+    error?: string;
+    users: Array<{
+      id: string;
+      shopId: string;
+      username: string;
+      firstName: string | null;
+      lastName: string | null;
+      workerNumber: string | null;
+      role: string;
+      isActive: boolean;
+    }>;
+  }>;
+  posUserLogin: (pin: string) => Promise<
+    | {
+        ok: true;
+        user: {
+          id: string;
+          shopId: string;
+          username: string;
+          firstName: string | null;
+          lastName: string | null;
+          workerNumber: string | null;
+          role: string;
+          isActive: boolean;
+        };
+      }
+    | { ok: false; reason: 'invalid_pin' | 'no_users' | 'invalid_format'; error?: string }
+  >;
+  posUsersHasAny: () => Promise<{ success: boolean; hasAny: boolean; error?: string }>;
+  onPosUsersUpdated: (callback: (info: { count: number }) => void) => () => void;
 }
 
 declare global {

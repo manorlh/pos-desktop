@@ -43,10 +43,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
     price: '',
     sku: '',
     categoryId: '',
-    stockQuantity: '0',
     barcode: '',
     imageUrl: '',
     inStock: true,
+    isAvailable: true,
   });
 
   // Don't close keyboard when dialog opens - let it work inside dialogs
@@ -59,10 +59,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
         price: product.price.toString(),
         sku: product.sku,
         categoryId: product.categoryId,
-        stockQuantity: product.stockQuantity.toString(),
         barcode: product.barcode || '',
         imageUrl: product.imageUrl || '',
         inStock: product.inStock,
+        isAvailable: product.isAvailable !== false,
       });
     } else {
       setFormData({
@@ -71,10 +71,10 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
         price: '',
         sku: '',
         categoryId: '',
-        stockQuantity: '0',
         barcode: '',
         imageUrl: '',
         inStock: true,
+        isAvailable: true,
       });
     }
     setErrors({});
@@ -101,10 +101,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
       newErrors.categoryId = t('products.categoryRequired');
     }
 
-    if (formData.stockQuantity && (isNaN(parseInt(formData.stockQuantity)) || parseInt(formData.stockQuantity) < 0)) {
-      newErrors.stockQuantity = t('products.stockInvalid');
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -127,11 +123,12 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
         price: parseFloat(formData.price),
         sku: formData.sku.trim(),
         categoryId: formData.categoryId,
-        stockQuantity: parseInt(formData.stockQuantity) || 0,
+        stockQuantity: 0,
         barcode: formData.barcode.trim() || undefined,
         taxRate: undefined, // Tax rate is now global, not per-product
         imageUrl: formData.imageUrl.trim() || undefined,
         inStock: formData.inStock,
+        isAvailable: formData.isAvailable,
         createdAt: product?.createdAt || now,
         updatedAt: now,
       };
@@ -240,21 +237,6 @@ export function ProductFormDialog({ open, onOpenChange, product }: ProductFormDi
                 </SelectContent>
               </Select>
               {errors.categoryId && <p className="text-sm text-destructive">{errors.categoryId}</p>}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="stockQuantity">{t('products.stockQuantity')}</Label>
-                <Input
-                  id="stockQuantity"
-                  type="number"
-                  value={formData.stockQuantity}
-                  onChange={(e) => setFormData({ ...formData, stockQuantity: e.target.value })}
-                  placeholder="0"
-                  className={errors.stockQuantity ? 'border-destructive' : ''}
-                />
-                {errors.stockQuantity && <p className="text-sm text-destructive">{errors.stockQuantity}</p>}
-              </div>
             </div>
 
             <div className="grid gap-2">

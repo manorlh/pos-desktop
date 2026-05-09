@@ -47,6 +47,8 @@ export const en = {
     items: 'items',
     each: 'each',
     stock: 'Stock',
+    notForSale: 'Not for sale',
+    outOfStockShort: 'Out of stock',
   },
   
   // Checkout
@@ -271,7 +273,7 @@ export const en = {
     virtualKeyboardDesc: 'Enable virtual keyboard for touch devices',
     virtualKeyboardTouchDesc: 'Enable or disable the virtual keyboard for touch input',
     hideOutOfStock: 'Hide Out of Stock Products',
-    hideOutOfStockDesc: 'Hide products with zero stock from the product catalog',
+    hideOutOfStockDesc: 'Hide products when the cloud catalog marks them not in stock.',
     language: 'Language',
     languageDesc: 'Select application language',
     languageHebrew: 'עברית (Hebrew)',
@@ -439,6 +441,60 @@ export const en = {
     invalidCashAmount: 'Cash amount must be a valid positive number',
     dayOpenedSuccess: 'Trading day opened successfully',
     dayClosedSuccess: 'Trading day closed successfully',
+  },
+  zClose: {
+    pendingTransactionsExist: 'Complete or cancel pending transactions before closing the day',
+    cloudRequired: 'Waiting for cloud connection to close the day',
+  },
+  refund: {
+    crossDayNotSupported: 'Cross-day refunds are not supported in this version',
+  },
+
+  // Login screen
+  login: {
+    title: 'POS Login',
+    subtitle: 'Pick a user and enter PIN',
+    cashiers: 'Cashiers',
+    enterPin: 'Enter PIN',
+    submit: 'Sign in',
+    clear: 'Clear',
+    logout: 'Logout',
+    invalidPin: 'Invalid PIN',
+    invalidFormat: 'PIN must be 4-6 digits',
+    noUsers: 'No POS users yet — sync from cloud',
+    role: {
+      cashier: 'Cashier',
+      shop_manager: 'Shop manager',
+    },
+  },
+
+  // Onboarding wizard
+  onboarding: {
+    title: 'Initial setup',
+    subtitle: 'Pair this register to the cloud and sync POS users to start',
+    step1Title: 'Pair this register',
+    step2Title: 'Sync POS users',
+    step2Hint: 'POS users (cashiers) are downloaded from the cloud and cached locally so login works offline.',
+    step2Locked: 'Finish step 1 first.',
+    step2Done: 'Users synced successfully.',
+    apiBase: 'Server URL',
+    pairingCode: 'Pairing code',
+    machineName: 'Register name',
+    machineNamePlaceholder: 'Optional, e.g. Front counter',
+    pairBtn: 'Pair',
+    pairingFailed: 'Pairing failed',
+    pairingOk: 'Register paired',
+    syncUsersBtn: 'Sync now',
+    syncUsersOk: 'Synced {count} users',
+    syncUsersFailed: 'User sync failed',
+    pairedSummary: 'This register is paired to the cloud',
+    machineCodeLabel: 'Register code',
+    repairBtn: 'Re-pair',
+    repairConfirm:
+      'Re-pairing will disconnect the register and remove its local POS users. Continue?',
+    repairing: 'Disconnecting...',
+    syncReturnedZero:
+      'No active POS users were found in the cloud for this shop. Create POS users in the dashboard (Shops ▸ POS users), then sync again.',
   },
 };
 

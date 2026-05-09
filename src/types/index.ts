@@ -7,6 +7,11 @@ export interface Product {
   categoryId: string;
   imageUrl?: string;
   inStock: boolean;
+  /** Cloud merchandising toggle: false = show on till but not sellable. */
+  isAvailable: boolean;
+  /** False when cloud assortment marks product hidden for this shop. */
+  shopListed?: boolean;
+  /** Not used on POS; SQLite column kept for schema; always 0. */
   stockQuantity: number;
   barcode?: string;
   taxRate?: number;

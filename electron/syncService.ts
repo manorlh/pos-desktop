@@ -4,6 +4,7 @@
  */
 
 import { cloudMqttClient, CloudMqttConfig } from './mqttClient';
+import { posUserSyncService } from './posUserSync';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { URL } = require('url');
@@ -35,6 +36,16 @@ export type CloudHttpConfig = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** Compare cloud vs local updatedAt without brittle string ordering (ISO or SQLite text). */
+function isIncomingOlderOrEqual(incomingUpdatedAt: string, existingUpdatedAt: string): boolean {
+  const a = Date.parse(incomingUpdatedAt);
+  const b = Date.parse(existingUpdatedAt);
+  if (!Number.isNaN(a) && !Number.isNaN(b)) {
+    return a <= b;
+  }
+  return String(incomingUpdatedAt) <= String(existingUpdatedAt);
 }
 
 function generateId(): string {
@@ -135,6 +146,7 @@ export class SyncService {
         ...config,
         onMqttConnected: () => {
           this.pullCatalog();
+          posUserSyncService.pullPosUsers();
         },
       };
       cloudMqttClient.connect(cfg);
@@ -144,6 +156,7 @@ export class SyncService {
     } else {
       console.warn('[Sync] No merchantId yet — MQTT disabled. Use GET /machines/me then reconnect or call pullCatalog.');
       this.pullCatalog();
+      posUserSyncService.pullPosUsers();
     }
   }
 
@@ -357,6 +370,12 @@ export class SyncService {
     if (parts.length >= 5 && parts[3] === 'catalog' && parts[4] === 'notify') {
       console.log('[Sync] catalog/notify — pulling via HTTP');
       this.pullCatalog();
+      return;
+    }
+    if (parts.length >= 5 && parts[3] === 'pos-users' && parts[4] === 'notify') {
+      console.log('[Sync] pos-users/notify — pulling via HTTP');
+      posUserSyncService.pullPosUsers();
+      return;
     }
   }
 
@@ -373,9 +392,12 @@ export class SyncService {
 
     const shopListed =
       item.shopListed === undefined || item.shopListed === null ? 1 : item.shopListed ? 1 : 0;
+    const isAvailable =
+      item.isAvailable === undefined || item.isAvailable === null ? 1 : item.isAvailable ? 1 : 0;
+    // POS does not track inventory counts; keep column 0 for SQLite schema only.
 
     if (existing) {
-      if (existing.updatedAt >= incomingUpdatedAt && existing.cloud_synced === 1) {
+      if (existing.cloud_synced === 1 && isIncomingOlderOrEqual(incomingUpdatedAt, existing.updatedAt)) {
         return;
       }
 
@@ -384,7 +406,7 @@ export class SyncService {
           `
         UPDATE products
         SET name = ?, description = ?, price = ?, sku = ?, categoryId = ?,
-            imageUrl = ?, inStock = ?, stockQuantity = ?, barcode = ?, taxRate = ?,
+            imageUrl = ?, inStock = ?, isAvailable = ?, stockQuantity = ?, barcode = ?, taxRate = ?,
             shopListed = ?, cloud_id = ?, cloud_synced = 1, last_cloud_sync = ?, updatedAt = ?
         WHERE id = ?
       `,
@@ -397,7 +419,8 @@ export class SyncService {
           item.categoryId,
           item.imageUrl,
           item.inStock ? 1 : 0,
-          item.stockQuantity,
+          isAvailable,
+          0,
           item.barcode,
           item.taxRate,
           shopListed,
@@ -412,8 +435,8 @@ export class SyncService {
           `
         INSERT OR IGNORE INTO products
           (id, name, description, price, sku, categoryId, imageUrl, inStock,
-           stockQuantity, barcode, taxRate, shopListed, cloud_id, cloud_synced, last_cloud_sync, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+           isAvailable, stockQuantity, barcode, taxRate, shopListed, cloud_id, cloud_synced, last_cloud_sync, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
       `,
         )
         .run(
@@ -425,7 +448,8 @@ export class SyncService {
           item.categoryId,
           item.imageUrl,
           item.inStock ? 1 : 0,
-          item.stockQuantity,
+          isAvailable,
+          0,
           item.barcode,
           item.taxRate,
           shopListed,
@@ -449,7 +473,7 @@ export class SyncService {
     const incomingUpdatedAt = item.updatedAt as string;
 
     if (existing) {
-      if (existing.updatedAt >= incomingUpdatedAt && existing.cloud_synced === 1) return;
+      if (existing.cloud_synced === 1 && isIncomingOlderOrEqual(incomingUpdatedAt, existing.updatedAt)) return;
 
       this.db
         .prepare(
@@ -509,6 +533,7 @@ export class SyncService {
       'cloud_synced INTEGER DEFAULT 0',
       'last_cloud_sync TEXT',
       'shopListed INTEGER NOT NULL DEFAULT 1',
+      'isAvailable INTEGER NOT NULL DEFAULT 1',
     ]) {
       try {
         this.db.exec(`ALTER TABLE products ADD COLUMN ${col}`);

@@ -164,13 +164,6 @@ export function ProductsPage() {
                       </Badge>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">{t('pos.stock')}</span>
-                      <Badge variant={product.stockQuantity > 0 ? 'default' : 'secondary'}>
-                        {product.stockQuantity}
-                      </Badge>
-                    </div>
-
                     {product.barcode && (
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">{t('products.barcode')}</span>
