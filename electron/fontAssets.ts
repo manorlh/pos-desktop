@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
 
 const HEBREW_UNICODE =
   'U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F';
@@ -21,18 +20,30 @@ export function resolveFontAssetsDir(resourcesPath: string): string | null {
   return null;
 }
 
-function fontFileUrl(assetsDir: string, file: string): string {
-  const filePath = path.join(assetsDir, file);
-  // Prefer unpacked path when fonts were asarUnpack'd from dist/assets.
-  const unpackedPath = filePath.replace(
-    `${path.sep}app.asar${path.sep}`,
-    `${path.sep}app.asar.unpacked${path.sep}`,
-  );
-  const loadPath = fs.existsSync(unpackedPath) ? unpackedPath : filePath;
-  return pathToFileURL(loadPath).href;
+/** Resolve a packaged font file for pos-font:// protocol (path traversal safe). */
+export function resolveFontFileByName(
+  resourcesPath: string,
+  filename: string,
+): string | null {
+  if (!FONT_FILE_RE.test(filename)) return null;
+
+  const assetsDir = resolveFontAssetsDir(resourcesPath);
+  if (!assetsDir) return null;
+
+  const filePath = path.resolve(assetsDir, filename);
+  const assetsRoot = path.resolve(assetsDir);
+  if (!filePath.startsWith(assetsRoot + path.sep) && filePath !== assetsRoot) {
+    return null;
+  }
+  if (!fs.existsSync(filePath)) return null;
+  return filePath;
 }
 
-/** Build @font-face rules with absolute file:// URLs for packaged Electron. */
+function fontCssUrl(filename: string): string {
+  return `pos-font://font/${encodeURIComponent(filename)}`;
+}
+
+/** Build @font-face rules using pos-font:// URLs (file:// fails in packaged Windows). */
 export function buildHeeboFontFaceCss(resourcesPath: string): string {
   const assetsDir = resolveFontAssetsDir(resourcesPath);
   if (!assetsDir) return '';
@@ -50,16 +61,19 @@ export function buildHeeboFontFaceCss(resourcesPath: string): string {
     if (!match) continue;
 
     const weightStr = match[1];
-    const fileUrl = fontFileUrl(assetsDir, file);
     rules.push(`@font-face {
   font-family: 'Heebo';
   font-style: normal;
   font-display: swap;
   font-weight: ${weightStr};
-  src: url("${fileUrl}") format('woff2');
+  src: url("${fontCssUrl(file)}") format('woff2');
   unicode-range: ${HEBREW_UNICODE};
 }`);
   }
 
   return rules.join('\n');
+}
+
+export function getPackagedResourcesPath(appPath: string, resourcesPath?: string): string {
+  return resourcesPath || path.join(path.dirname(appPath), '..');
 }
