@@ -532,9 +532,9 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold flex items-center gap-2">
+    <div className="container mx-auto p-4 till:p-4 xl:p-6 max-w-4xl">
+      <div className="mb-4 till:mb-4 xl:mb-6">
+        <h1 className="text-2xl till:text-2xl xl:text-3xl font-bold flex items-center gap-2">
           <Settings className="h-8 w-8" />
           {t('settings.title')}
         </h1>

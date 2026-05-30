@@ -124,15 +124,15 @@ export function LoginScreen({ refreshOnboarding }: Props) {
   }
 
   return (
-    <div className="h-screen w-screen bg-muted flex flex-col items-center justify-center p-6">
-      <div className="text-center mb-6">
-        <h1 className="text-3xl font-bold">{t('login.title')}</h1>
+    <div className="h-screen w-screen bg-muted flex flex-col items-center justify-center p-4 till:p-4 xl:p-6">
+      <div className="text-center mb-4 till:mb-4 xl:mb-6">
+        <h1 className="text-2xl till:text-2xl xl:text-3xl font-bold">{t('login.title')}</h1>
         <p className="text-muted-foreground mt-1">
           {selected ? displayName(selected) : t('login.subtitle')}
         </p>
       </div>
 
-      <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 till:gap-4 xl:gap-6">
         {/* Tile grid */}
         <Card>
           <CardContent className="p-4">
@@ -142,7 +142,7 @@ export function LoginScreen({ refreshOnboarding }: Props) {
                 {t('login.noUsers')}
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto pe-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 till:gap-2 xl:gap-3 max-h-[45vh] short:max-h-[38vh] till:max-h-[40vh] overflow-y-auto pe-1">
                 {sortedUsers.map((u) => {
                   const isSelected = selected?.id === u.id;
                   return (

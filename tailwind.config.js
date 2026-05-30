@@ -16,6 +16,12 @@ module.exports = {
       },
     },
     extend: {
+      screens: {
+        /** Viewports up to ~800px tall (e.g. 1024×768 POS till). */
+        short: { raw: '(max-height: 800px)' },
+        /** Typical compact till: ≤1280px wide and ≤820px tall. */
+        till: { raw: '(max-width: 1280px) and (max-height: 820px)' },
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

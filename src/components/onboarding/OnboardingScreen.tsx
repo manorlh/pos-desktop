@@ -187,8 +187,8 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
   };
 
   return (
-    <div className="h-screen w-screen bg-muted flex items-center justify-center p-6">
-      <Card className="w-full max-w-lg">
+    <div className="h-screen w-screen bg-muted flex items-center justify-center p-4 till:p-4 xl:p-6">
+      <Card className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
         <CardHeader>
           <CardTitle className="text-2xl">{t('onboarding.title')}</CardTitle>
           <p className="text-muted-foreground text-sm mt-1">{t('onboarding.subtitle')}</p>

@@ -24,7 +24,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   }, []);
 
   return (
-    <header className="h-16 border-b border-border bg-card px-4 lg:px-6 flex items-center justify-between">
+    <header className="h-14 till:h-14 xl:h-16 border-b border-border bg-card px-3 till:px-3 xl:px-6 flex items-center justify-between">
       <div className="flex items-center gap-4">
         {onMenuClick && (
           <Button
@@ -35,7 +35,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Menu className="h-5 w-5" />
           </Button>
         )}
-        <h2 className="text-lg font-semibold">{t('pos.title')}</h2>
+        <h2 className="text-base till:text-base xl:text-lg font-semibold">{t('pos.title')}</h2>
       </div>
       
       <div className="flex items-center gap-4">

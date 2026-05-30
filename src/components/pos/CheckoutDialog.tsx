@@ -354,188 +354,181 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 !overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
-          <DialogTitle className="text-2xl">{t('checkout.title')}</DialogTitle>
+      <DialogContent className="max-w-5xl w-[calc(100vw-1rem)] max-h-[calc(100vh-1rem)] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="px-3 py-2 lg:px-4 lg:py-3 border-b flex-shrink-0">
+          <DialogTitle className="text-lg lg:text-xl">{t('checkout.title')}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-[1.2fr_1fr] gap-6 p-6 flex-1 min-h-0 overflow-hidden">
-          {/* Left Side - Order Summary */}
-          <div className="flex flex-col min-h-0">
-            <Card className="flex-1 flex flex-col min-h-0">
-              <CardContent className="p-4 flex flex-col flex-1 min-h-0">
-                <h3 className="font-semibold text-lg mb-4 flex-shrink-0">{t('pos.currentSale')}</h3>
-                <div className="space-y-2 mb-4 flex-1 overflow-y-auto min-h-0">
-                  {cart.items.map((item: CartItem) => (
-                    <div key={item.id} className="flex justify-between items-center text-sm py-1 border-b border-border/50 last:border-0 flex-shrink-0">
-                      <div className="flex-1">
-                        <span className="font-medium">{item.product.name}</span>
-                        <span className="text-muted-foreground ml-2">× {item.quantity}</span>
-                      </div>
-                      <span className="font-semibold">{formatCurrency(item.totalPrice, locale)}</span>
+        <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-2 lg:gap-4 p-3 lg:p-4 flex-1 min-h-0 overflow-hidden">
+          {/* Order summary — item list scrolls when needed */}
+          <Card className="flex flex-col min-h-0 overflow-hidden shrink-0 lg:shrink lg:h-full">
+            <CardContent className="p-2 lg:p-3 flex flex-col min-h-0 overflow-hidden h-full">
+              <h3 className="font-semibold text-sm mb-1 flex-shrink-0">{t('pos.currentSale')}</h3>
+              <div className="space-y-0.5 overflow-y-auto min-h-0 max-h-16 lg:max-h-none lg:flex-1">
+                {cart.items.map((item: CartItem) => (
+                  <div key={item.id} className="flex justify-between items-center text-sm py-0.5 border-b border-border/50 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium">{item.product.name}</span>
+                      <span className="text-muted-foreground ml-2">× {item.quantity}</span>
                     </div>
-                  ))}
-                </div>
-                
-                <div className="border-t pt-4 space-y-2 flex-shrink-0">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{t('pos.subtotal')}:</span>
-                    <span>{formatCurrency(cart.subtotal, locale)}</span>
+                    <span className="font-semibold shrink-0 ms-2">{formatCurrency(item.totalPrice, locale)}</span>
                   </div>
-                  {cart.discountAmount > 0 && (
-                    <div className="flex justify-between text-sm text-destructive">
-                      <span>{t('pos.discount')}:</span>
-                      <span>-{formatCurrency(cart.discountAmount, locale)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{t('pos.tax')}:</span>
-                    <span>{formatCurrency(cart.taxAmount, locale)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t">
-                    <span className="text-lg font-bold">{t('pos.total')}:</span>
-                    <span className="text-2xl font-bold text-primary">{formatCurrency(cart.totalAmount, locale)}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+                ))}
+              </div>
 
-          {/* Right Side - Payment Section */}
-          <div className="flex flex-col min-h-0">
-            <Card className="flex-1 flex flex-col min-h-0">
-              <CardContent className="p-4 flex flex-col flex-1 min-h-0">
-                <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 flex-shrink-0">
-                  {paymentMode === 'card' ? (
-                    <CreditCard className="h-5 w-5 text-primary" />
-                  ) : (
-                    <DollarSign className="h-5 w-5 text-primary" />
-                  )}
-                  {t('checkout.paymentMethod')}: {paymentMode === 'card' ? t('checkout.card') : t('checkout.cash')}
-                </h3>
-
-                {canUseCardPayment && (
-                  <div className="flex gap-2 mb-4 flex-shrink-0" role="tablist" aria-label={t('checkout.paymentMethod')}>
-                    <Button
-                      type="button"
-                      variant={paymentMode === 'cash' ? 'default' : 'outline'}
-                      className="flex-1 h-12 text-base"
-                      onClick={() => {
-                        setPaymentMode('cash');
-                        setError(null);
-                      }}
-                    >
-                      <DollarSign className="mr-2 h-5 w-5 shrink-0" />
-                      {t('checkout.cash')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={paymentMode === 'card' ? 'default' : 'outline'}
-                      className="flex-1 h-12 text-base"
-                      onClick={() => {
-                        setPaymentMode('card');
-                        setError(null);
-                      }}
-                    >
-                      <CreditCard className="mr-2 h-5 w-5 shrink-0" />
-                      {t('checkout.card')}
-                    </Button>
+              <div className="border-t pt-1.5 mt-1.5 space-y-0.5 flex-shrink-0">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{t('pos.subtotal')}:</span>
+                  <span>{formatCurrency(cart.subtotal, locale)}</span>
+                </div>
+                {cart.discountAmount > 0 && (
+                  <div className="flex justify-between text-xs text-destructive">
+                    <span>{t('pos.discount')}:</span>
+                    <span>-{formatCurrency(cart.discountAmount, locale)}</span>
                   </div>
                 )}
-                
-                {/* Total Amount Display */}
-                <div className="mb-4 p-4 bg-primary/10 rounded-lg border border-primary/20 flex-shrink-0">
-                  <div className="text-sm text-muted-foreground mb-1">{t('pos.total')}</div>
-                  <div className="text-2xl font-bold text-primary">{formatCurrency(cart.totalAmount, locale)}</div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{t('pos.tax')}:</span>
+                  <span>{formatCurrency(cart.taxAmount, locale)}</span>
                 </div>
+                <div className="flex justify-between items-center pt-1 border-t">
+                  <span className="text-sm font-bold">{t('pos.total')}:</span>
+                  <span className="text-base lg:text-lg font-bold text-primary">{formatCurrency(cart.totalAmount, locale)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-                {paymentMode === 'cash' && (
-                  <>
-                {/* Amount Input and Quick Buttons Row */}
-                <div className="mb-4 flex-shrink-0">
-                  <label className="text-sm font-medium mb-2 block">{t('checkout.amountTendered')}</label>
-                  <div className="relative mb-3">
-                    <Input
-                      ref={inputRef}
-                      type="number"
-                      step="0.01"
-                      value={amountTendered}
-                      onChange={(e) => setAmountTendered(e.target.value)}
-                      placeholder="0.00"
-                      className="text-2xl font-bold h-14 text-center pr-12"
-                      autoFocus
-                      showVirtualKeyboard={false}
-                    />
-                    {amountTendered && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
-                        onClick={() => setAmountTendered('')}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  
-                  {/* Quick Amount Buttons */}
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-2">Quick Amount</div>
-                    <div className="grid grid-cols-4 gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleQuickAmount(20)}
-                        className="text-xs"
-                      >
-                        +20
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleQuickAmount(50)}
-                        className="text-xs"
-                      >
-                        +50
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleQuickAmount(100)}
-                        className="text-xs"
-                      >
-                        +100
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleQuickAmount(200)}
-                        className="text-xs"
-                      >
-                        +200
-                      </Button>
+          {/* Payment section — keypad fills middle; complete button lives in footer */}
+          <Card className="flex flex-col min-h-0 overflow-hidden lg:h-full">
+            <CardContent className="p-2 lg:p-3 flex flex-col min-h-0 overflow-hidden h-full gap-1.5 lg:gap-2">
+              <h3 className="font-semibold text-sm flex items-center gap-2 flex-shrink-0">
+                {paymentMode === 'card' ? (
+                  <CreditCard className="h-4 w-4 text-primary" />
+                ) : (
+                  <DollarSign className="h-4 w-4 text-primary" />
+                )}
+                {t('checkout.paymentMethod')}: {paymentMode === 'card' ? t('checkout.card') : t('checkout.cash')}
+              </h3>
+
+              {canUseCardPayment && (
+                <div className="flex gap-2 flex-shrink-0" role="tablist" aria-label={t('checkout.paymentMethod')}>
+                  <Button
+                    type="button"
+                    variant={paymentMode === 'cash' ? 'default' : 'outline'}
+                    className="flex-1 h-8 lg:h-9 text-sm"
+                    onClick={() => {
+                      setPaymentMode('cash');
+                      setError(null);
+                    }}
+                  >
+                    <DollarSign className="mr-1.5 h-4 w-4 shrink-0" />
+                    {t('checkout.cash')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={paymentMode === 'card' ? 'default' : 'outline'}
+                    className="flex-1 h-8 lg:h-9 text-sm"
+                    onClick={() => {
+                      setPaymentMode('card');
+                      setError(null);
+                    }}
+                  >
+                    <CreditCard className="mr-1.5 h-4 w-4 shrink-0" />
+                    {t('checkout.card')}
+                  </Button>
+                </div>
+              )}
+
+              {paymentMode === 'cash' && (
+                <>
+                  <div className="flex-shrink-0 flex flex-wrap items-end gap-2">
+                    <div className="w-auto max-w-[8.5rem]">
+                      <label className="text-xs font-medium mb-0.5 block">{t('checkout.amountTendered')}</label>
+                      <div className="relative">
+                        <Input
+                          ref={inputRef}
+                          type="number"
+                          step="0.01"
+                          value={amountTendered}
+                          onChange={(e) => setAmountTendered(e.target.value)}
+                          placeholder="0.00"
+                          className="text-sm font-semibold h-8 text-center pr-7"
+                          autoFocus
+                          showVirtualKeyboard={false}
+                        />
+                        {amountTendered && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0.5 top-1/2 -translate-y-1/2 h-6 w-6"
+                            onClick={() => setAmountTendered('')}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-1 gap-1 min-w-0">
+                      {[20, 50, 100, 200].map((amount) => (
+                        <Button
+                          key={amount}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleQuickAmount(amount)}
+                          className="text-xs h-8 flex-1 px-1"
+                        >
+                          +{amount}
+                        </Button>
+                      ))}
                     </div>
                   </div>
-                </div>
 
-                {/* Keyboard and Payment Info Row */}
-                <div className="flex gap-4 flex-1 min-h-0">
-                  {/* Compact Numeric Keyboard - Left */}
-                  {showKeyboard && (
+                  {(changeAmount > 0 ||
+                    (parseFloat(amountTendered || '0') > 0 &&
+                      parseFloat(amountTendered || '0') < cart.totalAmount)) && (
                     <div className="flex-shrink-0">
-                      <div className="flex flex-col gap-1.5 bg-muted/50 p-3 rounded-lg">
+                      {changeAmount > 0 ? (
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-green-500/10 rounded-md border border-green-500/20">
+                          <span className="text-xs font-medium text-green-800 dark:text-green-400">
+                            {t('checkout.changeDue')}
+                          </span>
+                          <span className="text-sm font-bold text-green-600 shrink-0">
+                            {formatCurrency(changeAmount, locale)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-destructive/10 rounded-md border border-destructive/20">
+                          <span className="text-xs font-medium text-destructive">
+                            {t('checkout.insufficientAmount')}
+                          </span>
+                          <span className="text-xs font-bold text-destructive shrink-0">
+                            {formatCurrency(
+                              cart.totalAmount - parseFloat(amountTendered || '0'),
+                              locale,
+                            )}{' '}
+                            {t('checkout.more')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {showKeyboard && (
+                    <div className="flex-1 min-h-0 flex flex-col">
+                      <div className="grid grid-rows-4 flex-1 min-h-0 gap-1 bg-muted/50 p-1.5 rounded-lg">
                         {numericKeys.map((row, rowIndex) => (
-                          <div key={rowIndex} className="flex gap-1.5">
+                          <div key={rowIndex} className="grid grid-cols-3 gap-1 min-h-0">
                             {row.map((key) => (
                               <Button
                                 key={key}
                                 variant={key === 'backspace' ? 'destructive' : 'secondary'}
-                                size="sm"
-                                className="h-10 w-10 p-0 text-sm font-semibold hover:scale-105 transition-transform active:scale-95"
+                                size="lg"
+                                className="h-full min-h-[2rem] max-h-12 lg:max-h-14 w-full p-0 text-base lg:text-lg font-semibold"
                                 onClick={() => handleKeyPress(key)}
                               >
                                 {key === 'backspace' ? (
-                                  <Delete className="h-4 w-4" />
+                                  <Delete className="h-4 w-4 lg:h-5 lg:w-5" />
                                 ) : (
                                   key
                                 )}
@@ -546,116 +539,95 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                       </div>
                     </div>
                   )}
+                </>
+              )}
 
-                  {/* Payment Info - Right */}
-                  <div className="flex-1 flex flex-col min-h-0">
-                    {/* Change Display */}
-                    {changeAmount > 0 && (
-                      <div className="mb-4 p-4 bg-green-500/10 rounded-lg border border-green-500/20 flex-shrink-0">
-                        <div className="text-sm text-muted-foreground mb-1">{t('checkout.changeDue')}</div>
-                        <div className="text-2xl font-bold text-green-600">{formatCurrency(changeAmount, locale)}</div>
-                      </div>
-                    )}
-                    
-                    {error && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
-                        {error}
-                      </div>
-                    )}
-                    
-                    {!isDayOpen && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
-                        {t('tradingDay.cannotProcessTransaction')}
-                      </div>
-                    )}
-
-                    {parseFloat(amountTendered || '0') < cart.totalAmount && parseFloat(amountTendered || '0') > 0 && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
-                        {t('checkout.insufficientAmount')} {formatCurrency(cart.totalAmount - parseFloat(amountTendered || '0'), locale)} {t('checkout.more')}.
-                      </div>
-                    )}
-
-                    <Button 
-                      className="w-full h-14 text-lg font-bold flex-shrink-0 mt-auto" 
-                      size="lg"
-                      disabled={!canCompleteCash || isProcessing}
-                      onClick={handleCompleteTransaction}
-                    >
-                      {isProcessing ? (
-                        <div className="flex items-center gap-2">
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          {t('checkout.processing')}
-                        </div>
-                      ) : (
-                        <>
-                          <Check className="mr-2 h-5 w-5" />
-                          {t('checkout.completeSale')}
-                        </>
-                      )}
-                    </Button>
-                  </div>
+              {paymentMode === 'card' && (
+                <div className="flex flex-col flex-1 min-h-0">
+                  <p className="text-xs text-muted-foreground flex-shrink-0">
+                    {t('checkout.cardPaymentHint')}
+                  </p>
+                  {amountAgorot < 1 && (
+                    <div className="mt-2 p-2 bg-destructive/10 text-destructive rounded-lg text-xs border border-destructive/20">
+                      {t('errors.invalidNumber')}
+                    </div>
+                  )}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Pinned footer — always visible */}
+        <div className="flex-shrink-0 border-t px-3 py-2 lg:px-4 lg:py-3 bg-background space-y-2">
+          {error && (
+            <div className="p-2 bg-destructive/10 text-destructive rounded-lg text-xs border border-destructive/20">
+              {error}
+            </div>
+          )}
+
+          {!isDayOpen && (
+            <div className="p-2 bg-destructive/10 text-destructive rounded-lg text-xs border border-destructive/20">
+              {t('tradingDay.cannotProcessTransaction')}
+            </div>
+          )}
+
+          {paymentMode === 'cash' && (
+            <Button
+              className="w-full h-10 lg:h-11 text-sm lg:text-base font-bold"
+              size="lg"
+              disabled={!canCompleteCash || isProcessing}
+              onClick={handleCompleteTransaction}
+            >
+              {isProcessing ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  {t('checkout.processing')}
+                </div>
+              ) : (
+                <>
+                  <Check className="mr-2 h-5 w-5" />
+                  {t('checkout.completeSale')}
+                </>
+              )}
+            </Button>
+          )}
+
+          {paymentMode === 'card' && (
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full h-10 lg:h-11 text-sm lg:text-base font-bold"
+                size="lg"
+                disabled={!canCompleteCard || isProcessing}
+                onClick={handleCompleteCard}
+              >
+                {isProcessing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    {t('checkout.waitingForCard')}
+                  </div>
+                ) : (
+                  <>
+                    <CreditCard className="mr-2 h-5 w-5" />
+                    {t('checkout.payWithCard')}
                   </>
                 )}
-
-                {paymentMode === 'card' && (
-                  <div className="flex flex-col flex-1 min-h-0">
-                    <p className="text-sm text-muted-foreground mb-4 flex-shrink-0">
-                      {t('checkout.cardPaymentHint')}
-                    </p>
-                    {amountAgorot < 1 && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
-                        {t('errors.invalidNumber')}
-                      </div>
-                    )}
-                    {error && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
-                        {error}
-                      </div>
-                    )}
-                    {!isDayOpen && (
-                      <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20 flex-shrink-0">
-                        {t('tradingDay.cannotProcessTransaction')}
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-3 mt-auto w-full flex-shrink-0">
-                      <Button
-                        className="w-full h-14 text-lg font-bold"
-                        size="lg"
-                        disabled={!canCompleteCard || isProcessing}
-                        onClick={handleCompleteCard}
-                      >
-                        {isProcessing ? (
-                          <div className="flex items-center gap-2">
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                            {t('checkout.waitingForCard')}
-                          </div>
-                        ) : (
-                          <>
-                            <CreditCard className="mr-2 h-5 w-5" />
-                            {t('checkout.payWithCard')}
-                          </>
-                        )}
-                      </Button>
-                      {canAbortCardPayment &&
-                        isProcessing &&
-                        activeCardVuid &&
-                        canCompleteCard && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="w-full h-12 text-base border-destructive/50 text-destructive hover:bg-destructive/10"
-                            onClick={handleAbortCardPayment}
-                          >
-                            {t('checkout.cancelCardPayment')}
-                          </Button>
-                        )}
-                    </div>
-                  </div>
+              </Button>
+              {canAbortCardPayment &&
+                isProcessing &&
+                activeCardVuid &&
+                canCompleteCard && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full h-9 text-sm border-destructive/50 text-destructive hover:bg-destructive/10"
+                    onClick={handleAbortCardPayment}
+                  >
+                    {t('checkout.cancelCardPayment')}
+                  </Button>
                 )}
-              </CardContent>
-            </Card>
-          </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

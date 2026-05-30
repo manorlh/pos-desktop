@@ -34,8 +34,8 @@ export function ProductCatalog() {
   return (
     <div className="flex flex-col h-full">
       {/* Search and Filters */}
-      <div className="mb-6">
-        <div className="flex gap-4 mb-4">
+      <div className="mb-4 till:mb-4 xl:mb-6">
+        <div className="flex gap-2 till:gap-3 mb-3 till:mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -90,12 +90,12 @@ export function ProductCatalog() {
       </div>
 
       {/* Products Grid/List */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto p-0.5">
         {viewMode === 'grid' ? (
           <div 
-            className="grid gap-2 sm:gap-3 md:gap-4"
+            className="grid gap-3 lg:gap-4"
             style={{
-              gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))'
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(132px, 100%), 1fr))',
             }}
           >
             {filteredProducts.map((product) => {
@@ -104,7 +104,7 @@ export function ProductCatalog() {
               <Card 
                 key={product.id} 
                 className={cn(
-                  'transition-shadow min-w-[120px]',
+                  'transition-shadow',
                   canSell ? 'cursor-pointer hover:shadow-md' : 'opacity-55 cursor-not-allowed',
                 )}
                 onClick={() => handleAddToCart(product.id)}
@@ -143,7 +143,7 @@ export function ProductCatalog() {
             );})}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {filteredProducts.map((product) => {
               const canSell = canSellProduct(product);
               return (

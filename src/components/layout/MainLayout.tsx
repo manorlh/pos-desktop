@@ -48,8 +48,8 @@ export function MainLayout() {
       <div 
         className="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out" 
         style={{
-          marginRight: sidebarOpen ? '16rem' : '0',
-          paddingBottom: isKeyboardOpen ? 'var(--keyboard-height, 400px)' : '0px',
+          marginRight: sidebarOpen ? '14rem' : '0',
+          paddingBottom: isKeyboardOpen ? 'var(--keyboard-height, 280px)' : '0px',
           transition: 'margin-right 0.3s ease-out, padding-bottom 0.3s ease-out',
         }}
       >

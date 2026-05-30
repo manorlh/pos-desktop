@@ -49,7 +49,7 @@ export function Cart({ onClose }: CartProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="lg:hidden"
+                className="xl:hidden"
                 onClick={onClose}
               >
                 <X className="h-4 w-4" />
@@ -69,7 +69,7 @@ export function Cart({ onClose }: CartProps) {
             </div>
           </div>
         ) : (
-          <div className="p-4 space-y-3">
+          <div className="p-4 space-y-4">
             {cart.items.map((item) => (
               <Card key={item.id} className="relative">
                 <CardContent className="p-3">

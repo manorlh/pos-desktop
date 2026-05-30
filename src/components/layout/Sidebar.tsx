@@ -71,7 +71,7 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
     <aside
       className={cn(
         "fixed inset-y-0 right-0 z-40 bg-card border-l border-border flex flex-col transform transition-transform duration-300 ease-in-out",
-        "w-64",
+        "w-56 till:w-56 xl:w-64",
         // Slide in from right when open, slide out to right when closed
         isOpen ? "translate-x-0" : "translate-x-full"
       )}
