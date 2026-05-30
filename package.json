@@ -1,7 +1,7 @@
 {
   "name": "pos-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -95,7 +95,9 @@
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**/*",
       "**/node_modules/bindings/**/*",
-      "**/node_modules/file-uri-to-path/**/*"
+      "**/node_modules/file-uri-to-path/**/*",
+      "**/dist/assets/*.woff",
+      "**/dist/assets/*.woff2"
     ],
     "beforePack": "./scripts/before-pack.js",
     "mac": {
