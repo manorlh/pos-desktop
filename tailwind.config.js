@@ -16,6 +16,9 @@ module.exports = {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['Heebo', 'system-ui', 'sans-serif'],
+      },
       screens: {
         /** Viewports up to ~800px tall (e.g. 1024×768 POS till). */
         short: { raw: '(max-height: 800px)' },

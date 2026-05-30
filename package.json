@@ -22,6 +22,7 @@
     "postinstall:windows": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@fontsource/heebo": "^5.2.8",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-icons": "^1.3.0",
     "@radix-ui/react-label": "^2.1.8",
