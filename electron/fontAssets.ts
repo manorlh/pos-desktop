@@ -1,6 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
 
 /** Unicode ranges from @fontsource/heebo — one @font-face per subset/weight. */
 const SUBSET_UNICODE: Record<string, string> = {
