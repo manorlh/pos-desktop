@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { DEFAULT_CLOUD_SERVER_URL } from '../../config/cloudDefaults';
+import { AppVersionBadge } from '../layout/AppVersionBadge';
 
 /**
  * First-run wizard. Two gates:
@@ -187,7 +188,8 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
   };
 
   return (
-    <div className="h-screen w-screen bg-muted flex items-center justify-center p-4 till:p-4 xl:p-6">
+    <div className="h-screen w-screen bg-muted flex items-center justify-center p-4 till:p-4 xl:p-6 relative">
+      <AppVersionBadge className="absolute top-3 end-4 till:top-3 till:end-4" />
       <Card className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
         <CardHeader>
           <CardTitle className="text-2xl">{t('onboarding.title')}</CardTitle>

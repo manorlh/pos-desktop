@@ -4,6 +4,7 @@ import { useAuthStore, type PosUserPublic } from '../../stores/useAuthStore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { TechnicianScreen } from './TechnicianScreen';
+import { AppVersionBadge } from '../layout/AppVersionBadge';
 
 interface Props {
   refreshOnboarding: () => Promise<void>;
@@ -124,7 +125,8 @@ export function LoginScreen({ refreshOnboarding }: Props) {
   }
 
   return (
-    <div className="h-screen w-screen bg-muted flex flex-col items-center justify-center p-4 till:p-4 xl:p-6">
+    <div className="h-screen w-screen bg-muted flex flex-col items-center justify-center p-4 till:p-4 xl:p-6 relative">
+      <AppVersionBadge className="absolute top-3 end-4 till:top-3 till:end-4" />
       <div className="text-center mb-4 till:mb-4 xl:mb-6">
         <h1 className="text-2xl till:text-2xl xl:text-3xl font-bold">{t('login.title')}</h1>
         <p className="text-muted-foreground mt-1">

@@ -1,7 +1,7 @@
 {
   "name": "pos-desktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -75,6 +75,7 @@
   "build": {
     "appId": "com.posdesktop.app",
     "productName": "POS Desktop",
+    "artifactName": "POS-Desktop-${version}-Setup.${ext}",
     "directories": {
       "output": "release/${version}"
     },

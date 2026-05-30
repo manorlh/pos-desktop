@@ -32,6 +32,13 @@ jobs:
       - name: Install app dependencies for Electron
         run: npm run postinstall:windows
       
+      - name: Read app version
+        id: version
+        shell: pwsh
+        run: |
+          $v = node -p "require('./package.json').version"
+          "version=$v" >> $env:GITHUB_OUTPUT
+      
       - name: Build application and Windows installer
         run: npm run electron:build
         env:
@@ -45,12 +52,14 @@ jobs:
       
       - name: Copy installer to known location
         run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $destName = "POS-Desktop-$version-Setup.exe"
           $installer = Get-ChildItem -Path release -Recurse -Filter "*Setup*.exe" -File | Where-Object { $_.Extension -eq ".exe" -and $_.Name -notlike "*.blockmap" } | Select-Object -First 1
           if ($installer) {
             Write-Host "Found installer: $($installer.FullName)"
             Write-Host "Size: $([math]::Round($installer.Length/1MB,2)) MB"
-            Copy-Item -Path $installer.FullName -Destination "installer.exe" -Force
-            Write-Host "Copied to installer.exe"
+            Copy-Item -Path $installer.FullName -Destination $destName -Force
+            Write-Host "Copied to $destName"
           } else {
             Write-Host "ERROR: Installer not found!"
             exit 1
@@ -60,15 +69,15 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: installer.exe
+          name: pos-desktop-v${{ steps.version.outputs.version }}-windows
+          path: POS-Desktop-${{ steps.version.outputs.version }}-Setup.exe
           retention-days: 30
           if-no-files-found: error
       
       - name: Upload Windows installer blockmap (optional)
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-blockmap
+          name: pos-desktop-v${{ steps.version.outputs.version }}-windows-blockmap
           path: release/**/*.exe.blockmap
           retention-days: 30
           if-no-files-found: ignore

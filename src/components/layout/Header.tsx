@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useI18n } from '@/i18n';
 import { useTradingDayStore } from '@/stores/useTradingDayStore';
+import { AppVersionBadge } from './AppVersionBadge';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -12,7 +13,6 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [appVersion, setAppVersion] = useState<string | null>(null);
   const { t, locale } = useI18n();
   const { isDayOpen, currentTradingDay } = useTradingDayStore();
 
@@ -22,10 +22,6 @@ export function Header({ onMenuClick }: HeaderProps) {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    void window.electronAPI?.getAppVersion().then(setAppVersion);
   }, []);
 
   return (
@@ -44,11 +40,7 @@ export function Header({ onMenuClick }: HeaderProps) {
       </div>
       
       <div className="flex items-center gap-4">
-        {appVersion && (
-          <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
-            v{appVersion}
-          </span>
-        )}
+        <AppVersionBadge />
         <div className="flex items-center gap-2">
           <Badge variant={isDayOpen ? 'default' : 'secondary'}>
             {isDayOpen ? t('tradingDay.dayOpen') : t('tradingDay.dayClosed')}
