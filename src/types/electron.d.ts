@@ -90,6 +90,7 @@ interface IntegrationLogRow {
 
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
+  getHeeboFontCss: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
   
   // Printer functions

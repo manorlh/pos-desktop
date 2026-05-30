@@ -74,7 +74,7 @@
     @apply font-sans;
   }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground font-sans font-medium antialiased;
     font-feature-settings: 'tnum' 1;
   }
 }

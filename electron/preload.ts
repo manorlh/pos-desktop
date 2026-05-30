@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getHeeboFontCss: () => ipcRenderer.invoke('get-heebo-font-css'),
   showMessageBox: (options: any) => ipcRenderer.invoke('show-message-box', options),
   
   // Printer functions
