@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Printer functions
   getPrinters: () => ipcRenderer.invoke('get-printers'),
   printTest: (printerName: string) => ipcRenderer.invoke('print-test', printerName),
+  printReceipt: (payload: unknown) => ipcRenderer.invoke('print-receipt', payload),
   showPrintPreview: (printerName: string) => ipcRenderer.invoke('show-print-preview', printerName),
   
   // Tax Report functions

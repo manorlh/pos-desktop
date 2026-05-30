@@ -9,8 +9,22 @@ export interface InputProps
 }
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, showVirtualKeyboard = true, onFocus, value, onChange, ...props }, ref) => {
-    const { openKeyboard, isOpen: isKeyboardOpen } = useVirtualKeyboard();
+  (
+    {
+      className,
+      type,
+      showVirtualKeyboard = true,
+      onFocus,
+      onChange,
+      onPaste,
+      onCut,
+      onDrop,
+      value,
+      ...props
+    },
+    ref,
+  ) => {
+    const { openKeyboard, isOpen: isKeyboardOpen, reportFieldValue } = useVirtualKeyboard();
     const { virtualKeyboardEnabled } = useSettingsStore();
     
     const inputRef = React.useRef<HTMLInputElement>(null);
@@ -72,10 +86,38 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      // Physical keyboard input - update normally
       onChange?.(e);
-      // Note: Virtual keyboard will sync when it reopens or when user clicks on it
-      // Physical keyboard and virtual keyboard can work simultaneously
+      if (isKeyboardOpen) {
+        reportFieldValue(e.target.value);
+      }
+    };
+
+    const scheduleReportFieldValue = (el: HTMLInputElement) => {
+      if (!isKeyboardOpen) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => reportFieldValue(el.value));
+      });
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+      onPaste?.(e);
+      if (!e.defaultPrevented) {
+        scheduleReportFieldValue(e.currentTarget);
+      }
+    };
+
+    const handleCut = (e: React.ClipboardEvent<HTMLInputElement>) => {
+      onCut?.(e);
+      if (!e.defaultPrevented) {
+        scheduleReportFieldValue(e.currentTarget);
+      }
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLInputElement>) => {
+      onDrop?.(e);
+      if (!e.defaultPrevented) {
+        scheduleReportFieldValue(e.currentTarget);
+      }
     };
 
     return (
@@ -88,6 +130,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         ref={inputRef}
         onFocus={handleFocus}
         onChange={handleChange}
+        onPaste={handlePaste}
+        onCut={handleCut}
+        onDrop={handleDrop}
         onKeyDown={(e) => {
           // Ensure keyboard events work even when virtual keyboard is open
           // Don't prevent default - let the input handle it normally

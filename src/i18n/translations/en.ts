@@ -340,7 +340,7 @@ export const en = {
     cloudSyncDesc:
       'Connect this terminal to the POS cloud server. Generate a pairing code in the web dashboard (distributor), then enter it here. Assign the machine to a merchant in the dashboard before expecting catalog sync.',
     cloudApiBase: 'Server API base URL',
-    cloudApiBasePlaceholder: 'http://localhost:8001',
+    cloudApiBasePlaceholder: 'https://dabd-5-29-19-54.ngrok-free.app',
     cloudApiBaseHint: 'Host and port only is fine; /api/v1 is added if missing.',
     cloudPairingCode: 'Pairing code',
     cloudPairingCodePlaceholder: 'Code from dashboard',
@@ -512,6 +512,12 @@ export const en = {
     resetSuccess: 'Reset complete. Returning to initial setup…',
     resetFailed: 'Reset failed.',
     back: 'Back to login',
+  },
+
+  receipt: {
+    printFailedTitle: 'Print error',
+    printFailed: 'Receipt did not print. Check the printer.',
+    printFailedDetail: 'Details: {{reason}}',
   },
 };
 

@@ -11,6 +11,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useProductStore } from '@/stores/useProductStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useI18n } from '@/i18n';
+import { DEFAULT_CLOUD_SERVER_URL } from '@/config/cloudDefaults';
 
 const NAYAX_INTEGRATION_LOG_TYPE = 'nayax_card_integration';
 
@@ -691,7 +692,7 @@ export function SettingsPage() {
               id="cloud-api-base"
               value={cloudApiBase}
               onChange={(e) => setCloudApiBase(e.target.value)}
-              placeholder={t('settings.cloudApiBasePlaceholder')}
+              placeholder={DEFAULT_CLOUD_SERVER_URL}
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">{t('settings.cloudApiBaseHint')}</p>

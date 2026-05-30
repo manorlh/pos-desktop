@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { DEFAULT_CLOUD_SERVER_URL } from '../../config/cloudDefaults';
 
 /**
  * First-run wizard. Two gates:
@@ -37,7 +38,7 @@ interface Props {
 
 export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Props) {
   const { t } = useI18n();
-  const [apiBase, setApiBase] = useState('');
+  const [apiBase, setApiBase] = useState(DEFAULT_CLOUD_SERVER_URL+'/api/v1');
   const [code, setCode] = useState('');
   const [machineName, setMachineName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -232,7 +233,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
                   <Input
                     value={apiBase}
                     onChange={(e) => setApiBase(e.target.value)}
-                    placeholder="https://api.example.com/api/v1"
+                    placeholder={DEFAULT_CLOUD_SERVER_URL}
                     disabled={busy}
                   />
                 </div>

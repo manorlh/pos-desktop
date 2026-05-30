@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
-import { DollarSign, Check, X, Delete, CreditCard } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { DollarSign, Check, X, Delete, CreditCard, AlertCircle } from 'lucide-react';
 import { useCartStore } from '@/stores/useCartStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
 import { useProductStore } from '@/stores/useProductStore';
 import { useTradingDayStore } from '@/stores/useTradingDayStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useBusinessStore } from '@/stores/useBusinessStore';
 import { 
   Dialog, 
   DialogContent, 
@@ -15,9 +16,11 @@ import {
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { formatCurrency } from '@/lib/utils';
 import { useI18n } from '@/i18n';
-import type { CartItem } from '@/types';
+import { buildReceiptPrintPayload } from '@/utils/receiptPrint';
+import type { CartItem, Transaction } from '@/types';
 
 interface CheckoutDialogProps {
   open: boolean;
@@ -42,11 +45,13 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     completePendingCardTransaction,
     cancelPendingTransaction,
   } = useTransactionStore();
-  const { loadProducts } = useProductStore();
+  const { loadProducts, categories } = useProductStore();
   const { isDayOpen } = useTradingDayStore();
-  const { loadSettings } = useSettingsStore();
+  const { loadSettings, globalTaxRate, language } = useSettingsStore();
+  const { businessInfo } = useBusinessStore();
   const { t, locale } = useI18n();
   const [error, setError] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
   /** Set after pending row exists; used for Nayax abort + cancel button visibility */
   const [activeCardVuid, setActiveCardVuid] = useState<string | null>(null);
 
@@ -114,6 +119,51 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     ['.', '0', 'backspace']
   ];
 
+  const printReceiptAfterSale = useCallback(
+    async (tx: Transaction): Promise<string | null> => {
+      if (!window.electronAPI?.printReceipt) {
+        return t('receipt.printFailed');
+      }
+      try {
+        const payload = buildReceiptPrintPayload(
+          tx,
+          businessInfo,
+          globalTaxRate,
+          language,
+          categories,
+        );
+        const result = await window.electronAPI.printReceipt(payload);
+        if (!result.success) {
+          return result.error || t('receipt.printFailed');
+        }
+        return null;
+      } catch (e: unknown) {
+        return e instanceof Error ? e.message : t('receipt.printFailed');
+      }
+    },
+    [businessInfo, categories, globalTaxRate, language, t],
+  );
+
+  const finishSuccessfulCheckout = useCallback(
+    (receiptPrintError: string | null) => {
+      setPrintError(receiptPrintError);
+      setIsComplete(true);
+
+      const closeDelayMs = receiptPrintError ? 5000 : 2000;
+      setTimeout(() => {
+        clearCart();
+        setIsComplete(false);
+        setAmountTendered('');
+        setError(null);
+        setPrintError(null);
+        setPaymentMode('cash');
+        setLastChangeAmount(0);
+        onOpenChange(false);
+      }, closeDelayMs);
+    },
+    [clearCart, onOpenChange],
+  );
+
   const handleCompleteTransaction = async () => {
     if (!canCompleteCash) return;
 
@@ -129,25 +179,16 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
       const amountTenderedNum = parseFloat(amountTendered);
       
       setLastChangeAmount(changeAmount);
-      await addTransaction(cart, {
+      const tx = await addTransaction(cart, {
         mode: 'cash',
         amountTendered: amountTenderedNum,
         changeAmount: changeAmount,
       });
-      
+
       await loadProducts();
-      
-      setIsComplete(true);
-      
-      setTimeout(() => {
-        clearCart();
-        setIsComplete(false);
-        setAmountTendered('');
-        setError(null);
-        setPaymentMode('cash');
-        setLastChangeAmount(0);
-        onOpenChange(false);
-      }, 2000);
+
+      const receiptPrintError = await printReceiptAfterSale(tx);
+      finishSuccessfulCheckout(receiptPrintError);
     } catch (error: unknown) {
       console.error('Transaction failed:', error);
       const msg = error instanceof Error ? error.message : t('tradingDay.cannotProcessTransaction');
@@ -225,22 +266,15 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         statusCode: res.statusCode,
       });
       setLastChangeAmount(0);
-      await completePendingCardTransaction(pending.id, nayaxMeta);
+      const tx = await completePendingCardTransaction(pending.id, nayaxMeta);
 
       pendingCardTransactionIdRef.current = null;
       pendingId = null;
 
       await loadProducts();
-      setIsComplete(true);
 
-      setTimeout(() => {
-        clearCart();
-        setIsComplete(false);
-        setError(null);
-        setPaymentMode('cash');
-        setLastChangeAmount(0);
-        onOpenChange(false);
-      }, 2000);
+      const receiptPrintError = await printReceiptAfterSale(tx);
+      finishSuccessfulCheckout(receiptPrintError);
     } catch (error: unknown) {
       console.error('Card transaction failed:', error);
       if (pendingId && !approvalSucceeded) {
@@ -269,6 +303,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     setPaymentMode('cash');
     setLastChangeAmount(0);
     setActiveCardVuid(null);
+    setPrintError(null);
   };
 
   const handleClose = (open: boolean) => {
@@ -298,6 +333,19 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                 </div>
               )}
             </DialogDescription>
+
+            {printError && (
+              <Alert variant="destructive" className="mt-4 text-right">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>{t('receipt.printFailedTitle')}</AlertTitle>
+                <AlertDescription>
+                  <p>{t('receipt.printFailed')}</p>
+                  <p className="text-xs mt-1 opacity-90">
+                    {t('receipt.printFailedDetail', { reason: printError })}
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         </DialogContent>
       </Dialog>

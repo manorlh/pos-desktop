@@ -339,7 +339,7 @@ export const he = {
     cloudSyncDesc:
       'חבר את הקופה לשרת הענן. יצרו קוד צימוד בלוח הבקרה (מפיץ), והזינו אותו כאן. יש לשייך את המסוף לסוחר בלוח הבקרה לפני סנכרון קטלוג.',
     cloudApiBase: 'כתובת בסיס API של השרת',
-    cloudApiBasePlaceholder: 'http://localhost:8001',
+    cloudApiBasePlaceholder: 'https://dabd-5-29-19-54.ngrok-free.app',
     cloudApiBaseHint: 'ניתן להזין מארח ופורט בלבד; יתווסף /api/v1 אם חסר.',
     cloudPairingCode: 'קוד צימוד',
     cloudPairingCodePlaceholder: 'הקוד מהלוח',
@@ -508,6 +508,12 @@ export const he = {
     resetSuccess: 'האיפוס הושלם. מעביר להתחלה ראשונה…',
     resetFailed: 'האיפוס נכשל.',
     back: 'חזרה להתחברות',
+  },
+
+  receipt: {
+    printFailedTitle: 'שגיאת הדפסה',
+    printFailed: 'הקבלה לא הודפסה. בדוק את המדפסת.',
+    printFailedDetail: 'פרטים: {{reason}}',
   },
 };
 

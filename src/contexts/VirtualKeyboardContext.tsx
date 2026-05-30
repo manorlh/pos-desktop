@@ -4,6 +4,8 @@ import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 interface VirtualKeyboardContextType {
   openKeyboard: (onInput: (value: string) => void, inputType?: 'text' | 'number' | 'numeric', currentValue?: string) => void;
   closeKeyboard: () => void;
+  /** Push the focused field's value into the open keyboard (paste, cut, physical keys, etc.). */
+  reportFieldValue: (value: string) => void;
   isOpen: boolean;
   keyboardHeight: number;
 }
@@ -63,13 +65,21 @@ export function VirtualKeyboardProvider({ children }: { children: ReactNode }) {
   };
 
   const handleInput = (value: string) => {
+    setCurrentValue(value);
     if (onInputCallback) {
       onInputCallback(value);
     }
   };
 
+  const reportFieldValue = (value: string) => {
+    if (!isOpen) return;
+    handleInput(value);
+  };
+
   return (
-    <VirtualKeyboardContext.Provider value={{ openKeyboard, closeKeyboard, isOpen, keyboardHeight }}>
+    <VirtualKeyboardContext.Provider
+      value={{ openKeyboard, closeKeyboard, reportFieldValue, isOpen, keyboardHeight }}
+    >
       {children}
       <VirtualKeyboard
         isOpen={isOpen}

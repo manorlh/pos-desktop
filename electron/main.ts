@@ -36,6 +36,7 @@ import {
   buildD120Record,
   collectUniqueProductsForM100,
 } from '../src/utils/taxReportGenerator';
+import { buildReceiptHtml, type ReceiptPrintPayload } from '../src/utils/receiptTemplate';
 
 const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
@@ -1771,6 +1772,80 @@ ipcMain.handle('print-test', async (event, printerName) => {
   } catch (error) {
     console.error('Error printing:', error);
     return { success: false, error: error.message };
+  }
+});
+
+/** Print HTML content to the OS default printer (silent). */
+async function printHtmlToDefaultPrinter(html: string): Promise<{ success: boolean; printed?: boolean; error?: string }> {
+  if (!win) {
+    return { success: false, error: 'Application window not ready' };
+  }
+
+  const printers = win.webContents.getPrintersAsync
+    ? await win.webContents.getPrintersAsync()
+    : win.webContents.getPrinters();
+  if (!printers || printers.length === 0) {
+    return { success: false, error: 'No printers found' };
+  }
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    width: 400,
+    height: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  try {
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const printOptions: Record<string, unknown> = {
+      silent: true,
+      printBackground: true,
+      color: false,
+      margin: { marginType: 'minimum' },
+      landscape: false,
+      pagesPerSheet: 1,
+      collate: false,
+      copies: 1,
+    };
+
+    return await new Promise((resolve) => {
+      printWindow.webContents.print(printOptions, (success, failureReason) => {
+        printWindow.close();
+        if (success) {
+          resolve({ success: true, printed: true });
+        } else {
+          resolve({
+            success: false,
+            error: failureReason || 'Print failed',
+          });
+        }
+      });
+    });
+  } catch (error: any) {
+    try {
+      printWindow.close();
+    } catch {
+      /* ignore */
+    }
+    return { success: false, error: error.message || 'Print failed' };
+  }
+}
+
+ipcMain.handle('print-receipt', async (_event, payload: ReceiptPrintPayload) => {
+  try {
+    if (!payload?.transaction?.cart?.items) {
+      return { success: false, error: 'Invalid receipt payload' };
+    }
+    const html = buildReceiptHtml(payload);
+    return await printHtmlToDefaultPrinter(html);
+  } catch (error: any) {
+    console.error('[IPC] print-receipt error:', error);
+    return { success: false, error: error.message || 'Failed to print receipt' };
   }
 });
 

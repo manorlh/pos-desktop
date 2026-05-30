@@ -13,6 +13,15 @@ interface PrintResult {
   error?: string;
 }
 
+interface ReceiptPrintPayload {
+  transaction: unknown;
+  businessInfo: unknown;
+  globalTaxRate: number;
+  language?: 'he' | 'en';
+  categoryNames?: Record<string, string>;
+  printedAt?: string;
+}
+
 interface TaxReportOptions {
   transactions: any[];
   businessInfo: any;
@@ -86,6 +95,7 @@ interface ElectronAPI {
   // Printer functions
   getPrinters: () => Promise<Printer[]>;
   printTest: (printerName: string) => Promise<PrintResult>;
+  printReceipt: (payload: ReceiptPrintPayload) => Promise<PrintResult>;
   showPrintPreview: (printerName: string) => Promise<PrintResult>;
   
   // Tax Report functions

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Languages } from 'lucide-react';
 import { Button } from './button';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,42 @@ export function VirtualKeyboard({
   const [language, setLanguage] = useState<Language>('hebrew'); // Default to Hebrew
   const keyboardRef = useRef<HTMLDivElement>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(400);
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
+
+  const isEditableField = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement => {
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA') return true;
+    if (tag !== 'INPUT') return false;
+    const type = (el as HTMLInputElement).type;
+    return type !== 'file' && type !== 'checkbox' && type !== 'radio' && type !== 'hidden';
+  };
+
+  const syncFromActiveElement = useCallback(() => {
+    const activeElement = document.activeElement;
+    if (!isEditableField(activeElement)) return;
+    const newValue = activeElement.value;
+    setInput((prev) => {
+      if (newValue === prev) return prev;
+      onInputRef.current(newValue);
+      return newValue;
+    });
+  }, []);
+
+  const scheduleSyncFromActiveElement = useCallback(
+    (defer = false) => {
+      if (!defer) {
+        syncFromActiveElement();
+        return;
+      }
+      // Paste/cut apply to the field after the event handler returns.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(syncFromActiveElement);
+      });
+    },
+    [syncFromActiveElement],
+  );
 
   useEffect(() => {
     // Sync with current value when keyboard opens or value changes
@@ -62,42 +98,47 @@ export function VirtualKeyboard({
     }
   }, [isOpen]);
 
-  // Sync with physical keyboard input in real-time
+  // Sync with physical keyboard, paste, cut, and other DOM edits while open.
   useEffect(() => {
-    if (isOpen) {
-      // Sync value from physical keyboard in real-time
-      // Track the currently focused input dynamically
-      const syncInterval = setInterval(() => {
-        const activeElement = document.activeElement as HTMLInputElement;
-        if (activeElement && activeElement.tagName === 'INPUT' && activeElement.type !== 'file') {
-          // Sync value if it changed
-          if (activeElement.value !== input) {
-            setInput(activeElement.value);
-            onInput(activeElement.value);
-          }
-        }
-      }, 100);
-      
-      // Listen to input events on all inputs for immediate sync
-      const handleInput = (e: Event) => {
-        const target = e.target as HTMLInputElement;
-        if (target && target.tagName === 'INPUT' && target.type !== 'file' && target === document.activeElement) {
-          if (target.value !== input) {
-            setInput(target.value);
-            onInput(target.value);
-          }
-        }
-      };
-      
-      // Add event listener to document to catch all input events
-      document.addEventListener('input', handleInput, true);
-      
-      return () => {
-        clearInterval(syncInterval);
-        document.removeEventListener('input', handleInput, true);
-      };
+    if (!isOpen) return;
+
+    const syncInterval = setInterval(syncFromActiveElement, 100);
+
+    const onInputEvent = () => scheduleSyncFromActiveElement(false);
+    const onDeferredEdit = () => scheduleSyncFromActiveElement(true);
+    const onBeforeInput = (e: Event) => {
+      const ie = e as InputEvent;
+      if (
+        ie.inputType === 'insertFromPaste' ||
+        ie.inputType === 'insertFromDrop' ||
+        ie.inputType === 'deleteByCut'
+      ) {
+        scheduleSyncFromActiveElement(true);
+      }
+    };
+
+    const editEvents = ['input', 'change', 'keyup'] as const;
+    const deferredEvents = ['paste', 'cut', 'drop'] as const;
+
+    for (const ev of editEvents) {
+      document.addEventListener(ev, onInputEvent, true);
     }
-  }, [isOpen, input, onInput]);
+    for (const ev of deferredEvents) {
+      document.addEventListener(ev, onDeferredEdit, true);
+    }
+    document.addEventListener('beforeinput', onBeforeInput, true);
+
+    return () => {
+      clearInterval(syncInterval);
+      for (const ev of editEvents) {
+        document.removeEventListener(ev, onInputEvent, true);
+      }
+      for (const ev of deferredEvents) {
+        document.removeEventListener(ev, onDeferredEdit, true);
+      }
+      document.removeEventListener('beforeinput', onBeforeInput, true);
+    };
+  }, [isOpen, syncFromActiveElement, scheduleSyncFromActiveElement]);
 
   useEffect(() => {
     if (isOpen) {
