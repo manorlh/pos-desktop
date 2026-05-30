@@ -12,6 +12,7 @@ release/
 dist/
 dist-electron/
 dist-ssr/
+build/
 *.local
 
 # Dependencies

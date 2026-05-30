@@ -5,16 +5,12 @@ import { loadPackagedHeeboFonts } from './utils/loadPackagedHeeboFonts'
 import App from './App.tsx'
 
 async function loadFonts(): Promise<void> {
-  if (import.meta.env.PROD) {
-    await loadPackagedHeeboFonts()
+  if (import.meta.env.DEV) {
+    const { loadDevFonts } = await import('./utils/loadDevFonts')
+    await loadDevFonts()
     return
   }
-  await Promise.all([
-    import('@fontsource/heebo/400.css'),
-    import('@fontsource/heebo/500.css'),
-    import('@fontsource/heebo/600.css'),
-    import('@fontsource/heebo/700.css'),
-  ])
+  await loadPackagedHeeboFonts()
 }
 
 loadFonts().then(() => {
