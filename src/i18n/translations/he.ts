@@ -460,6 +460,7 @@ export const he = {
     invalidPin: 'PIN שגוי',
     invalidFormat: 'PIN חייב להיות 4-6 ספרות',
     noUsers: 'לא קיימים משתמשי POS — סנכרן עם הענן',
+    technicianBtn: 'טכנאי',
     role: {
       cashier: 'קופאי',
       shop_manager: 'מנהל סניף',
@@ -492,6 +493,21 @@ export const he = {
     repairing: 'מנתק...',
     syncReturnedZero:
       'לא נמצאו משתמשי קופה פעילים בענן עבור החנות הזו. צרו משתמשי קופה בלוח הבקרה (חנויות ▸ משתמשי קופה) ואז סנכרנו שוב.',
+  },
+
+  technician: {
+    title: 'מצב טכנאי',
+    subtitle: 'איפוס מלא של התוכנה על מחשב זה',
+    warning:
+      'פעולה זו תמחק את כל הנתונים המקומיים, תנתק את הקופה מהענן, ותחזיר להתחלה ראשונה.',
+    resetBtn: 'איפוס תוכנה',
+    resetTitle: 'לאפס את התוכנה?',
+    resetMessage: 'לא ניתן לבטל. כל הנתונים המקומיים יימחקו והקופה תחזור למסך ההתחלה.',
+    resetConfirm: 'אפס',
+    resetWorking: 'מאפס…',
+    resetSuccess: 'האיפוס הושלם. מעביר להתחלה ראשונה…',
+    resetFailed: 'האיפוס נכשל.',
+    back: 'חזרה להתחברות',
   },
 };
 

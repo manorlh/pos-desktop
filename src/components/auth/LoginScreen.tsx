@@ -3,6 +3,11 @@ import { useI18n } from '../../i18n';
 import { useAuthStore, type PosUserPublic } from '../../stores/useAuthStore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
+import { TechnicianScreen } from './TechnicianScreen';
+
+interface Props {
+  refreshOnboarding: () => Promise<void>;
+}
 
 const KEYS: Array<string | { kind: 'clear' } | { kind: 'back' }> = [
   '1', '2', '3',
@@ -30,10 +35,11 @@ function displayName(u: PosUserPublic): string {
   return parts.length > 0 ? parts.join(' ') : u.username;
 }
 
-export function LoginScreen() {
+export function LoginScreen({ refreshOnboarding }: Props) {
   const { t } = useI18n();
   const login = useAuthStore((s) => s.login);
 
+  const [view, setView] = useState<'login' | 'technician'>('login');
   const [users, setUsers] = useState<PosUserPublic[]>([]);
   const [selected, setSelected] = useState<PosUserPublic | null>(null);
   const [pin, setPin] = useState('');
@@ -107,6 +113,15 @@ export function LoginScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin]);
+
+  if (view === 'technician') {
+    return (
+      <TechnicianScreen
+        onBack={() => setView('login')}
+        onResetComplete={refreshOnboarding}
+      />
+    );
+  }
 
   return (
     <div className="h-screen w-screen bg-muted flex flex-col items-center justify-center p-6">
@@ -237,6 +252,15 @@ export function LoginScreen() {
           </CardContent>
         </Card>
       </div>
+
+      <Button
+        variant="ghost"
+        className="mt-6 text-muted-foreground"
+        onClick={() => setView('technician')}
+        disabled={busy}
+      >
+        {t('login.technicianBtn')}
+      </Button>
     </div>
   );
 }

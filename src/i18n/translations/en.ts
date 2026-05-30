@@ -462,6 +462,7 @@ export const en = {
     invalidPin: 'Invalid PIN',
     invalidFormat: 'PIN must be 4-6 digits',
     noUsers: 'No POS users yet — sync from cloud',
+    technicianBtn: 'Technician',
     role: {
       cashier: 'Cashier',
       shop_manager: 'Shop manager',
@@ -495,6 +496,22 @@ export const en = {
     repairing: 'Disconnecting...',
     syncReturnedZero:
       'No active POS users were found in the cloud for this shop. Create POS users in the dashboard (Shops ▸ POS users), then sync again.',
+  },
+
+  technician: {
+    title: 'Technician mode',
+    subtitle: 'Full software reset on this computer',
+    warning:
+      'This will delete all local data, disconnect the register from the cloud, and return to initial setup.',
+    resetBtn: 'Reset software',
+    resetTitle: 'Reset software?',
+    resetMessage:
+      'This cannot be undone. All local data will be erased and the register will return to the setup screen.',
+    resetConfirm: 'Reset',
+    resetWorking: 'Resetting…',
+    resetSuccess: 'Reset complete. Returning to initial setup…',
+    resetFailed: 'Reset failed.',
+    back: 'Back to login',
   },
 };
 

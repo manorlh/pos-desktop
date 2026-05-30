@@ -173,6 +173,12 @@ export class SyncService {
     this.config = null;
   }
 
+  /** Stop cloud sync and drop the DB handle before the SQLite file is closed/deleted. */
+  shutdownForReset(): void {
+    this.disconnect();
+    this.db = null;
+  }
+
   /**
    * Pull catalog from cloud (debounced). Uses connect() config or stored DB settings.
    */

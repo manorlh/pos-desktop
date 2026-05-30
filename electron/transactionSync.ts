@@ -88,7 +88,18 @@ export class TransactionSyncService {
   private nextBackoffMs = BACKOFF_MIN_MS;
   private flushScheduled = false;
 
+  shutdown(): void {
+    if (this.periodicTimer) {
+      clearInterval(this.periodicTimer);
+      this.periodicTimer = null;
+    }
+    this.flushScheduled = false;
+    this.isFlushing = false;
+    this.db = null;
+  }
+
   init(db: any): void {
+    this.shutdown();
     this.db = db;
     this._resetOrphans();
     this._startPeriodicFlush();
@@ -476,13 +487,6 @@ export class TransactionSyncService {
     });
     const deleted = txn();
     return { deleted };
-  }
-
-  shutdown(): void {
-    if (this.periodicTimer) {
-      clearInterval(this.periodicTimer);
-      this.periodicTimer = null;
-    }
   }
 }
 

@@ -37,7 +37,16 @@ export class PosUserSyncService {
   private db: any = null;
   private pullDebounce: NodeJS.Timeout | null = null;
 
+  shutdown(): void {
+    if (this.pullDebounce) {
+      clearTimeout(this.pullDebounce);
+      this.pullDebounce = null;
+    }
+    this.db = null;
+  }
+
   init(db: any): void {
+    this.shutdown();
     this.db = db;
   }
 

@@ -40,6 +40,10 @@ export class AuthService {
     this.db = db;
   }
 
+  shutdown(): void {
+    this.db = null;
+  }
+
   /**
    * Verify a PIN against all active local POS users. First match wins.
    * Returns sanitised user metadata on success.

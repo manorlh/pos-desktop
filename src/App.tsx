@@ -210,7 +210,7 @@ function AppContent({ paired, hasUsers, loggedIn, onPaired, refreshOnboarding }:
           onRefresh={refreshOnboarding}
         />
       ) : !loggedIn ? (
-        <LoginScreen />
+        <LoginScreen refreshOnboarding={refreshOnboarding} />
       ) : (
         <div className="h-screen bg-background">
           <MainLayout />

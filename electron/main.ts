@@ -469,6 +469,18 @@ function deleteDatabaseFilesOnDisk(dbPath: string): void {
   }
 }
 
+/** Stop timers and drop stale DB handles before closing/deleting SQLite. */
+function shutdownDatabaseServicesBeforeReset(): void {
+  if (merchantAssignmentPoll) {
+    clearInterval(merchantAssignmentPoll);
+    merchantAssignmentPoll = null;
+  }
+  syncService.shutdownForReset();
+  transactionSyncService.shutdown();
+  posUserSyncService.shutdown();
+  authService.shutdown();
+}
+
 // Database operations
 function getAllProducts(db: any): any[] {
   const rows = db.prepare('SELECT * FROM products ORDER BY name').all();
@@ -637,7 +649,7 @@ function _fetchMerchantContext(
     const d = (data ?? {}) as Record<string, string | null | undefined>;
     const merchantId = d.merchantId ? String(d.merchantId) : null;
     const shopId = d.shopId ? String(d.shopId) : null;
-    if (merchantId) {
+    if (merchantId && db.open) {
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
         'cloud_merchant_id',
         merchantId,
@@ -2244,7 +2256,7 @@ ipcMain.handle('reset-database', async (_event, targetPath?: string) => {
   try {
     const dbPath =
       targetPath && String(targetPath).trim() ? String(targetPath).trim() : getResolvedDatabasePathMain();
-    syncService.disconnect();
+    shutdownDatabaseServicesBeforeReset();
     closeDatabaseMain();
     deleteDatabaseFilesOnDisk(dbPath);
     initializeDatabaseMain(dbPath);
