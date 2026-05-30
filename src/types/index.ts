@@ -6,6 +6,8 @@ export interface Product {
   sku: string;
   categoryId: string;
   imageUrl?: string;
+  /** Offline-first image src (pos-asset:// or remote URL). */
+  displayImageSrc?: string;
   inStock: boolean;
   /** Cloud merchandising toggle: false = show on till but not sellable. */
   isAvailable: boolean;
@@ -25,6 +27,7 @@ export interface Category {
   description?: string;
   color?: string;
   imageUrl?: string;
+  displayImageSrc?: string;
   parentId?: string;
   isActive: boolean;
   sortOrder: number;

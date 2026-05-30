@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
@@ -9,6 +9,7 @@ import { syncService } from './syncService';
 import { transactionSyncService } from './transactionSync';
 import { posUserSyncService } from './posUserSync';
 import { authService } from './auth';
+import { imageCacheService } from './imageCacheService';
 import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate } from './cloudPairing';
 
 import {
@@ -144,6 +145,7 @@ function createSchema(db: any): void {
       sku TEXT NOT NULL UNIQUE,
       categoryId TEXT NOT NULL,
       imageUrl TEXT,
+      localImagePath TEXT,
       inStock INTEGER NOT NULL DEFAULT 1,
       isAvailable INTEGER NOT NULL DEFAULT 1,
       stockQuantity INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +166,7 @@ function createSchema(db: any): void {
       description TEXT,
       color TEXT,
       imageUrl TEXT,
+      localImagePath TEXT,
       parentId TEXT,
       isActive INTEGER NOT NULL DEFAULT 1,
       sortOrder INTEGER NOT NULL DEFAULT 0,
@@ -423,6 +426,7 @@ function initializeDatabaseMain(dbPath: string): any {
   
   createSchema(dbInstance);
   syncService.init(dbInstance);
+  imageCacheService.init(dbInstance, app.getPath('userData'));
   transactionSyncService.init(dbInstance);
   posUserSyncService.init(dbInstance);
   authService.init(dbInstance);
@@ -486,7 +490,13 @@ function shutdownDatabaseServicesBeforeReset(): void {
 // Database operations
 function getAllProducts(db: any): any[] {
   const rows = db.prepare('SELECT * FROM products ORDER BY name').all();
-  return rows.map((row: any) => ({
+  return rows.map((row: any) => {
+    const hasLocal =
+      row.localImagePath && fs.existsSync(row.localImagePath);
+    const displayImageSrc = hasLocal
+      ? imageCacheService.assetUrl('product', row.id)
+      : row.imageUrl || undefined;
+    return {
     id: row.id,
     name: row.name,
     description: row.description || undefined,
@@ -494,6 +504,7 @@ function getAllProducts(db: any): any[] {
     sku: row.sku,
     categoryId: row.categoryId,
     imageUrl: row.imageUrl || undefined,
+    displayImageSrc,
     inStock: row.inStock === 1,
     isAvailable: row.isAvailable === undefined ? true : row.isAvailable === 1,
     shopListed: row.shopListed === undefined || row.shopListed === null ? true : row.shopListed === 1,
@@ -504,7 +515,8 @@ function getAllProducts(db: any): any[] {
     updatedAt: row.updatedAt,
     cloud_id: row.cloud_id || undefined,
     cloudId: row.cloud_id || undefined,
-  }));
+  };
+  });
 }
 
 function saveProduct(db: any, product: any): void {
@@ -534,12 +546,19 @@ function saveProduct(db: any, product: any): void {
 
 function getAllCategories(db: any): any[] {
   const rows = db.prepare('SELECT * FROM categories ORDER BY sortOrder, name').all();
-  return rows.map((row: any) => ({
+  return rows.map((row: any) => {
+    const hasLocal =
+      row.localImagePath && fs.existsSync(row.localImagePath);
+    const displayImageSrc = hasLocal
+      ? imageCacheService.assetUrl('category', row.id)
+      : row.imageUrl || undefined;
+    return {
     id: row.id,
     name: row.name,
     description: row.description || undefined,
     color: row.color || undefined,
     imageUrl: row.imageUrl || undefined,
+    displayImageSrc,
     parentId: row.parentId || undefined,
     isActive: row.isActive === 1,
     sortOrder: row.sortOrder,
@@ -547,7 +566,8 @@ function getAllCategories(db: any): any[] {
     updatedAt: row.updatedAt,
     cloud_id: row.cloud_id || undefined,
     cloudId: row.cloud_id || undefined,
-  }));
+  };
+  });
 }
 
 function saveCategory(db: any, category: any): void {
@@ -1473,11 +1493,31 @@ process.env.VITE_PUBLIC = app.isPackaged
   ? process.env.DIST
   : path.join(process.env.DIST, '../public');
 
+// Only one POS instance — prevents duplicate windows/MQTT connections on Windows.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    if (!win.isVisible()) win.show();
+    win.focus();
+  }
+});
+
 let win: BrowserWindow | null;
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'] || process.env['VITE_DEV_SERVER_HOST'] || 'http://localhost:5173';
 
 function createWindow() {
+  if (win && !win.isDestroyed()) {
+    win.focus();
+    return;
+  }
+
   win = new BrowserWindow({
     width: 1024,
     height: 768,
@@ -1520,6 +1560,10 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win?.show();
   });
+
+  win.on('closed', () => {
+    win = null;
+  });
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -1532,6 +1576,11 @@ app.on('window-all-closed', () => {
   }
 });
 
+app.on('before-quit', () => {
+  shutdownDatabaseServicesBeforeReset();
+  closeDatabaseMain();
+});
+
 app.on('activate', () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
@@ -1540,7 +1589,40 @@ app.on('activate', () => {
   }
 });
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'pos-asset',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      bypassCSP: true,
+    },
+  },
+]);
+
 app.whenReady().then(() => {
+  protocol.registerFileProtocol('pos-asset', (request: { url: string }, callback: (result: { path?: string; error?: number }) => void) => {
+    try {
+      const parsed = new URL(request.url);
+      const entityType = parsed.hostname as 'product' | 'category';
+      const entityId = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+      if (entityType !== 'product' && entityType !== 'category') {
+        callback({ error: -2 });
+        return;
+      }
+      const filePath = imageCacheService.resolveLocalFile(entityType, entityId);
+      if (!filePath) {
+        callback({ error: -6 });
+        return;
+      }
+      callback({ path: filePath });
+    } catch {
+      callback({ error: -2 });
+    }
+  });
+
   createWindow();
   
   // Set application menu

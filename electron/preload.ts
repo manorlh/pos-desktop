@@ -100,6 +100,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('catalog-updated', handler);
     return () => ipcRenderer.off('catalog-updated', handler);
   },
+  onCatalogImagesUpdated: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('catalog-images-updated', handler);
+    return () => ipcRenderer.off('catalog-images-updated', handler);
+  },
 
   // Cloud sync
   cloudPairingValidate: (payload: { apiBaseUrl: string; code: string; machineName?: string }) =>

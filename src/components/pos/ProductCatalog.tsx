@@ -8,6 +8,11 @@ import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useI18n } from '@/i18n';
+import { ProductImage } from './ProductImage';
+
+function productImageSrc(product: { displayImageSrc?: string; imageUrl?: string }) {
+  return product.displayImageSrc ?? product.imageUrl;
+}
 
 export function ProductCatalog() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -110,9 +115,12 @@ export function ProductCatalog() {
                 onClick={() => handleAddToCart(product.id)}
               >
                 <CardContent className="p-2 sm:p-3 md:p-4">
-                  <div className="aspect-square bg-muted rounded-lg mb-2 sm:mb-3 flex items-center justify-center">
-                    <span className="text-xl sm:text-2xl">📦</span>
-                  </div>
+                  <ProductImage
+                    src={productImageSrc(product)}
+                    alt={product.name}
+                    className="aspect-square rounded-lg mb-2 sm:mb-3 w-full"
+                    iconClassName="h-6 w-6 sm:h-8 sm:w-8"
+                  />
                   <h3 className="font-medium text-xs sm:text-sm mb-1 line-clamp-2">{product.name}</h3>
                   <p className="text-xs text-muted-foreground mb-1 sm:mb-2 line-clamp-1 hidden sm:block">
                     {product.description}
@@ -157,9 +165,12 @@ export function ProductCatalog() {
               >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 bg-muted rounded-lg flex items-center justify-center">
-                      <span className="text-xl">📦</span>
-                    </div>
+                    <ProductImage
+                      src={productImageSrc(product)}
+                      alt={product.name}
+                      className="w-16 h-16 rounded-lg shrink-0"
+                      iconClassName="h-5 w-5"
+                    />
                     <div className="flex-1">
                       <h3 className="font-medium mb-1">{product.name}</h3>
                       <p className="text-sm text-muted-foreground mb-2">

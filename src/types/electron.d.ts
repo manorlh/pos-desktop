@@ -159,6 +159,7 @@ interface ElectronAPI {
   onCatalogUpdated: (
     callback: (info: { syncType: string; products: number; categories: number }) => void,
   ) => () => void;
+  onCatalogImagesUpdated: (callback: () => void) => () => void;
 
   cloudPairingValidate: (payload: {
     apiBaseUrl: string;

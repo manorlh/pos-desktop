@@ -5,6 +5,7 @@
 
 import { cloudMqttClient, CloudMqttConfig } from './mqttClient';
 import { posUserSyncService } from './posUserSync';
+import { imageCacheService } from './imageCacheService';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { URL } = require('url');
@@ -303,6 +304,20 @@ export class SyncService {
     this._updateLastSync();
     console.log('[Sync] Applied catalog pull:', syncType, products.length, 'products,', categories.length, 'categories');
 
+    void imageCacheService.prefetchCatalog().then(() => {
+      console.log('[Sync] Product image cache updated');
+      try {
+        const wins = BrowserWindow.getAllWindows();
+        for (const w of wins) {
+          if (w && !w.isDestroyed()) {
+            w.webContents.send('catalog-images-updated');
+          }
+        }
+      } catch (e) {
+        console.error('[Sync] Failed to broadcast catalog-images-updated:', e);
+      }
+    });
+
     // Notify any open renderer windows so UI stores can refetch from SQLite.
     // Skip the empty-delta case to avoid forcing refetches when nothing changed.
     if (products.length > 0 || categories.length > 0) {
@@ -549,6 +564,19 @@ export class SyncService {
     }
 
     for (const col of ['cloud_id TEXT', 'cloud_synced INTEGER DEFAULT 0', 'last_cloud_sync TEXT']) {
+      try {
+        this.db.exec(`ALTER TABLE categories ADD COLUMN ${col}`);
+      } catch (_) {
+        /* exists */
+      }
+    }
+
+    for (const col of ['localImagePath TEXT']) {
+      try {
+        this.db.exec(`ALTER TABLE products ADD COLUMN ${col}`);
+      } catch (_) {
+        /* exists */
+      }
       try {
         this.db.exec(`ALTER TABLE categories ADD COLUMN ${col}`);
       } catch (_) {

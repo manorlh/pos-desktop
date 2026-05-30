@@ -130,6 +130,16 @@ function App() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    if (!window.electronAPI?.onCatalogImagesUpdated) return;
+    const unsubscribe = window.electronAPI.onCatalogImagesUpdated(() => {
+      const { loadProducts, loadCategories } = useProductStore.getState();
+      void loadProducts();
+      void loadCategories();
+    });
+    return unsubscribe;
+  }, []);
+
   // Refresh hasUsers gate when the main process applies a pos_users pull.
   useEffect(() => {
     if (!window.electronAPI?.onPosUsersUpdated) return;

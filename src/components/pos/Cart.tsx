@@ -8,6 +8,11 @@ import { Badge } from '../ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { CheckoutDialog } from './CheckoutDialog';
 import { useI18n } from '@/i18n';
+import { ProductImage } from './ProductImage';
+
+function productImageSrc(product: { displayImageSrc?: string; imageUrl?: string }) {
+  return product.displayImageSrc ?? product.imageUrl;
+}
 
 interface CartProps {
   onClose?: () => void;
@@ -73,8 +78,14 @@ export function Cart({ onClose }: CartProps) {
             {cart.items.map((item) => (
               <Card key={item.id} className="relative">
                 <CardContent className="p-3">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
+                  <div className="flex items-start justify-between mb-2 gap-2">
+                    <ProductImage
+                      src={productImageSrc(item.product)}
+                      alt={item.product.name}
+                      className="w-10 h-10 rounded-md shrink-0"
+                      iconClassName="h-4 w-4"
+                    />
+                    <div className="flex-1 min-w-0">
                       <h4 className="font-medium text-sm">{item.product.name}</h4>
                       <p className="text-xs text-muted-foreground">
                         {formatCurrency(item.unitPrice, locale)} {t('pos.each')}

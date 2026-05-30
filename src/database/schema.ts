@@ -21,6 +21,7 @@ export interface ProductRow {
   sku: string;
   categoryId: string;
   imageUrl: string | null;
+  localImagePath: string | null;
   inStock: number; // SQLite uses 0/1 for boolean
   /** Unused on POS; always 0. */
   stockQuantity: number;
@@ -36,6 +37,7 @@ export interface CategoryRow {
   description: string | null;
   color: string | null;
   imageUrl: string | null;
+  localImagePath: string | null;
   parentId: string | null;
   isActive: number; // SQLite uses 0/1 for boolean
   sortOrder: number;
