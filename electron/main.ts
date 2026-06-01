@@ -38,7 +38,7 @@ import {
   collectUniqueProductsForM100,
 } from '../src/utils/taxReportGenerator';
 import { buildReceiptHtml, type ReceiptPrintPayload } from '../src/utils/receiptTemplate';
-import { buildHeeboFontFaceCss, resolveFontFileByName, getPackagedResourcesPath } from './fontAssets';
+import { buildHeeboFontFaceCss, getPackagedResourcesPath } from './fontAssets';
 
 const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
@@ -1600,16 +1600,6 @@ protocol.registerSchemesAsPrivileged([
       bypassCSP: true,
     },
   },
-  {
-    scheme: 'pos-font',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      bypassCSP: true,
-    },
-  },
 ]);
 
 app.whenReady().then(() => {
@@ -1623,25 +1613,6 @@ app.whenReady().then(() => {
         return;
       }
       const filePath = imageCacheService.resolveLocalFile(entityType, entityId);
-      if (!filePath) {
-        callback({ error: -6 });
-        return;
-      }
-      callback({ path: filePath });
-    } catch {
-      callback({ error: -2 });
-    }
-  });
-
-  protocol.registerFileProtocol('pos-font', (request: { url: string }, callback: (result: { path?: string; error?: number }) => void) => {
-    try {
-      const parsed = new URL(request.url);
-      const filename = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-      const resourcesPath = getPackagedResourcesPath(
-        app.getAppPath(),
-        (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
-      );
-      const filePath = resolveFontFileByName(resourcesPath, filename);
       if (!filePath) {
         callback({ error: -6 });
         return;

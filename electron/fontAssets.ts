@@ -20,30 +20,15 @@ export function resolveFontAssetsDir(resourcesPath: string): string | null {
   return null;
 }
 
-/** Resolve a packaged font file for pos-font:// protocol (path traversal safe). */
-export function resolveFontFileByName(
-  resourcesPath: string,
-  filename: string,
-): string | null {
-  if (!FONT_FILE_RE.test(filename)) return null;
-
-  const assetsDir = resolveFontAssetsDir(resourcesPath);
-  if (!assetsDir) return null;
-
-  const filePath = path.resolve(assetsDir, filename);
-  const assetsRoot = path.resolve(assetsDir);
-  if (!filePath.startsWith(assetsRoot + path.sep) && filePath !== assetsRoot) {
-    return null;
-  }
-  if (!fs.existsSync(filePath)) return null;
-  return filePath;
-}
-
-function fontCssUrl(filename: string): string {
-  return `pos-font://font/${encodeURIComponent(filename)}`;
-}
-
-/** Build @font-face rules using pos-font:// URLs (file:// fails in packaged Windows). */
+/**
+ * Build @font-face rules with base64 data: URLs.
+ *
+ * Why data URLs and not file:// or a custom protocol: the packaged renderer
+ * runs on a file:// origin, so any cross-origin font (file:// to a different
+ * path, or pos-font://) is subject to CORS and Chromium silently refuses to
+ * use it for text rendering even though the bytes download. Inlining the woff2
+ * (~32KB total for the Hebrew subset) sidesteps origin/CORS entirely.
+ */
 export function buildHeeboFontFaceCss(resourcesPath: string): string {
   const assetsDir = resolveFontAssetsDir(resourcesPath);
   if (!assetsDir) return '';
@@ -61,12 +46,19 @@ export function buildHeeboFontFaceCss(resourcesPath: string): string {
     if (!match) continue;
 
     const weightStr = match[1];
+    let base64: string;
+    try {
+      base64 = fs.readFileSync(path.join(assetsDir, file)).toString('base64');
+    } catch {
+      continue;
+    }
+
     rules.push(`@font-face {
   font-family: 'Heebo';
   font-style: normal;
   font-display: swap;
   font-weight: ${weightStr};
-  src: url("${fontCssUrl(file)}") format('woff2');
+  src: url("data:font/woff2;base64,${base64}") format('woff2');
   unicode-range: ${HEBREW_UNICODE};
 }`);
   }
