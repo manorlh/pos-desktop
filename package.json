@@ -1,7 +1,7 @@
 {
   "name": "pos-desktop",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.2.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -18,8 +18,7 @@
     "test:watch": "vitest",
     "mock:openformat": "node scripts/mock-openformat.js",
     "build:windows": "echo '⚠️  Windows builds must be done on Windows or via GitHub Actions. Push to GitHub and use the Actions tab to build, or run this on a Windows machine: npm run electron:build'",
-    "postinstall": "node scripts/postinstall.js",
-    "postinstall:windows": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@fontsource/heebo": "^5.2.8",
@@ -39,7 +38,6 @@
     "iconv-lite": "^0.7.0",
     "lucide-react": "^0.294.0",
     "mqtt": "^4.3.7",
-    "node-printer": "^1.0.4",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -58,9 +56,8 @@
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
-    "electron": "^13.6.9",
-    "electron-builder": "^24.6.4",
-    "electron-rebuild": "^3.2.9",
+    "electron": "^36.9.5",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.53.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.4",
@@ -68,8 +65,8 @@
     "tailwindcss": "^3.3.6",
     "typescript": "^5.2.2",
     "vite": "^5.0.0",
-    "vite-plugin-electron": "^0.15.5",
-    "vite-plugin-electron-renderer": "^0.14.5",
+    "vite-plugin-electron": "^1.1.0",
+    "vite-plugin-electron-renderer": "^1.0.0",
     "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },

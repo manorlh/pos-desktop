@@ -11,10 +11,7 @@ on:
 
 jobs:
   build-windows:
-    # Pinned to 2022: node-gyp@9.4.1 (bundled) cannot detect VS 18 on windows-latest,
-    # and better-sqlite3@12.4.1 has no prebuilt binary for Electron 13, so it must
-    # compile from source. windows-2022 ships VS 2022 (v17) which node-gyp detects.
-    runs-on: windows-2022
+    runs-on: windows-latest
     
     steps:
       - name: Checkout code
@@ -28,12 +25,6 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-      
-      - name: Install setuptools (distutils for Python 3.12 / node-gyp)
-        run: python -m pip install setuptools
-      
-      - name: Install app dependencies for Electron
-        run: npm run postinstall:windows
       
       - name: Read app version
         id: version

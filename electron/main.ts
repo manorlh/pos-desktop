@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, powerMonitor, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
@@ -1901,23 +1901,22 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.whenReady().then(() => {
-  protocol.registerFileProtocol('pos-asset', (request: { url: string }, callback: (result: { path?: string; error?: number }) => void) => {
+  protocol.handle('pos-asset', (request: { url: string }) => {
     try {
       const parsed = new URL(request.url);
       const entityType = parsed.hostname as 'product' | 'category';
       const entityId = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
       if (entityType !== 'product' && entityType !== 'category') {
-        callback({ error: -2 });
-        return;
+        return new Response('Not found', { status: 404 });
       }
       const filePath = imageCacheService.resolveLocalFile(entityType, entityId);
       if (!filePath) {
-        callback({ error: -6 });
-        return;
+        return new Response('Not found', { status: 404 });
       }
-      callback({ path: filePath });
+      const { pathToFileURL } = require('node:url');
+      return net.fetch(pathToFileURL(filePath).toString());
     } catch {
-      callback({ error: -2 });
+      return new Response('Bad request', { status: 400 });
     }
   });
 
