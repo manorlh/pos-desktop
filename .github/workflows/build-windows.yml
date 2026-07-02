@@ -11,7 +11,10 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # Pinned to 2022: node-gyp@9.4.1 (bundled) cannot detect VS 18 on windows-latest,
+    # and better-sqlite3@12.4.1 has no prebuilt binary for Electron 13, so it must
+    # compile from source. windows-2022 ships VS 2022 (v17) which node-gyp detects.
+    runs-on: windows-2022
     
     steps:
       - name: Checkout code
