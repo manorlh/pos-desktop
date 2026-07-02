@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, protocol } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
@@ -8,9 +8,11 @@ const crypto = require('crypto');
 import { syncService } from './syncService';
 import { transactionSyncService } from './transactionSync';
 import { posUserSyncService } from './posUserSync';
+import { settingsSyncService } from './settingsSyncService';
+import { stockSyncService } from './stockSyncService';
 import { authService } from './auth';
 import { imageCacheService } from './imageCacheService';
-import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate } from './cloudPairing';
+import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate, postDeviceRegister, getDevicePollStatus, pairingCredentialsFromValidateData } from './cloudPairing';
 
 import {
   callNayaxJsonRpc,
@@ -38,6 +40,7 @@ import {
   collectUniqueProductsForM100,
 } from '../src/utils/taxReportGenerator';
 import { buildReceiptHtml, type ReceiptPrintPayload } from '../src/utils/receiptTemplate';
+import { buildVoucherHtml, type VoucherPrintPayload } from '../src/utils/voucherTemplate';
 import { buildHeeboFontFaceCss, getPackagedResourcesPath } from './fontAssets';
 
 const mainDirname = path.dirname(__filename);
@@ -158,6 +161,90 @@ function createSchema(db: any): void {
     )
   `);
 
+  try {
+    db.exec(`ALTER TABLE products ADD COLUMN voucherId TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  // Vouchers table (cloud-synced templates)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vouchers (
+      id TEXT PRIMARY KEY,
+      cloud_id TEXT UNIQUE,
+      name TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      title TEXT,
+      subtitle TEXT,
+      body_text TEXT,
+      footer_text TEXT,
+      validity_days INTEGER,
+      value_display_mode TEXT NOT NULL DEFAULT 'product_price',
+      display_value REAL,
+      print_barcode INTEGER NOT NULL DEFAULT 1,
+      print_qr INTEGER NOT NULL DEFAULT 1,
+      language TEXT DEFAULT 'he',
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  // Issued vouchers (one per voucher-linked transaction line)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS issued_vouchers (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL,
+      transaction_item_id TEXT,
+      voucher_id TEXT,
+      product_id TEXT,
+      product_name TEXT,
+      quantity REAL NOT NULL DEFAULT 1,
+      unit_value REAL,
+      face_value REAL,
+      issued_at TEXT NOT NULL,
+      expires_at TEXT,
+      status TEXT NOT NULL DEFAULT 'issued',
+      reprint_count INTEGER NOT NULL DEFAULT 0,
+      last_printed_at TEXT,
+      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_issued_vouchers_tx ON issued_vouchers(transaction_id)`);
+
+  try {
+    db.exec(`ALTER TABLE products ADD COLUMN track_stock INTEGER NOT NULL DEFAULT 0`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_levels (
+      product_id TEXT PRIMARY KEY,
+      cloud_product_id TEXT,
+      base_quantity REAL NOT NULL DEFAULT 0,
+      reorder_min INTEGER,
+      reorder_max INTEGER,
+      reorder_opt INTEGER,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id TEXT PRIMARY KEY,
+      product_id TEXT NOT NULL,
+      delta REAL NOT NULL,
+      reason TEXT NOT NULL,
+      transaction_id TEXT,
+      transaction_item_id TEXT,
+      synced INTEGER NOT NULL DEFAULT 0,
+      occurred_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tx ON stock_movements(transaction_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id)`);
+
   // Categories table
   db.exec(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -255,6 +342,24 @@ function createSchema(db: any): void {
     db.exec(`ALTER TABLE transactions ADD COLUMN syncedAt TEXT`);
   } catch (_) {
     // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN tipAmount REAL`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN tipPaymentMethod TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`UPDATE transactions SET tipAmount = 0 WHERE tipAmount IS NULL`);
+  } catch (_) {
+    // tipAmount column may not exist yet on very old DBs
   }
 
   // Transaction items table
@@ -405,6 +510,12 @@ function createSchema(db: any): void {
   `);
 }
 
+let dbSleepPaused = false;
+let dbResumeInProgress = false;
+let lastSystemWakeHandledAt = 0;
+let tenantBackfillInFlight = false;
+let cloudTenantMissingLogged = false;
+
 function initializeDatabaseMain(dbPath: string): any {
   // Ensure directory exists
   const dbDir = path.dirname(dbPath);
@@ -413,11 +524,20 @@ function initializeDatabaseMain(dbPath: string): any {
   }
 
   if (dbInstance) {
+    shutdownDatabaseServicesBeforeReset();
+    try {
+      if (isSqliteOpen(dbInstance)) {
+        dbInstance.pragma('wal_checkpoint(TRUNCATE)');
+      }
+    } catch (e) {
+      console.warn('[DB] wal checkpoint before reopen failed:', e);
+    }
     try {
       dbInstance.close();
     } catch (e) {
       // Ignore
     }
+    dbInstance = null;
   }
 
   dbInstance = new Database(dbPath);
@@ -429,8 +549,11 @@ function initializeDatabaseMain(dbPath: string): any {
   imageCacheService.init(dbInstance, app.getPath('userData'));
   transactionSyncService.init(dbInstance);
   posUserSyncService.init(dbInstance);
+  settingsSyncService.init(dbInstance);
+  stockSyncService.init(dbInstance);
   authService.init(dbInstance);
   tryReconnectCloudMqttFromDb(dbInstance);
+  dbSleepPaused = false;
 
   return dbInstance;
 }
@@ -444,9 +567,77 @@ function getDatabaseMain(): any {
 
 function closeDatabaseMain(): void {
   if (dbInstance) {
-    dbInstance.close();
+    shutdownDatabaseServicesBeforeReset();
+    try {
+      if (isSqliteOpen(dbInstance)) {
+        dbInstance.pragma('wal_checkpoint(TRUNCATE)');
+      }
+    } catch (e) {
+      console.warn('[DB] wal checkpoint before close failed:', e);
+    }
+    try {
+      dbInstance.close();
+    } catch (e) {
+      console.warn('[DB] close failed:', e);
+    }
     dbInstance = null;
   }
+}
+
+/** Checkpoint WAL and close SQLite before macOS sleep (avoids stale -shm on wake). */
+function pauseDatabaseForSystemSleep(): void {
+  if (dbSleepPaused || !dbInstance) return;
+  dbSleepPaused = true;
+  console.log('[DB] Pausing database for system sleep');
+  closeDatabaseMain();
+}
+
+function notifyRendererDatabaseEvent(channel: 'database-resumed' | 'database-resume-failed'): void {
+  try {
+    win?.webContents?.send(channel);
+  } catch (e) {
+    console.warn(`[DB] failed to notify renderer (${channel}):`, e);
+  }
+}
+
+/** Reopen SQLite after wake with short retries while the volume finishes mounting. */
+async function resumeDatabaseAfterSystemWake(): Promise<boolean> {
+  if (!dbSleepPaused && dbInstance && isSqliteOpen(dbInstance)) {
+    return true;
+  }
+  if (dbResumeInProgress) return false;
+  dbResumeInProgress = true;
+  const dbPath = getResolvedDatabasePathMain();
+  const delaysMs = [0, 400, 1200];
+  try {
+    console.log('[DB] Resuming database after system wake');
+    for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+      if (delaysMs[attempt] > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+      }
+      try {
+        initializeDatabaseMain(dbPath);
+        dbSleepPaused = false;
+        notifyRendererDatabaseEvent('database-resumed');
+        return true;
+      } catch (e) {
+        console.warn(`[DB] wake reopen attempt ${attempt + 1}/${delaysMs.length} failed:`, e);
+      }
+    }
+    notifyRendererDatabaseEvent('database-resume-failed');
+    return false;
+  } finally {
+    dbResumeInProgress = false;
+  }
+}
+
+function scheduleResumeDatabaseAfterSystemWake(): void {
+  const now = Date.now();
+  if (now - lastSystemWakeHandledAt < 2500) return;
+  lastSystemWakeHandledAt = now;
+  void resumeDatabaseAfterSystemWake().catch((e) => {
+    console.warn('[DB] resume on wake failed:', e);
+  });
 }
 
 /** Active DB path from app settings.json (same rules as get-database-path IPC). */
@@ -477,17 +668,95 @@ function deleteDatabaseFilesOnDisk(dbPath: string): void {
 
 /** Stop timers and drop stale DB handles before closing/deleting SQLite. */
 function shutdownDatabaseServicesBeforeReset(): void {
-  if (merchantAssignmentPoll) {
-    clearInterval(merchantAssignmentPoll);
-    merchantAssignmentPoll = null;
-  }
   syncService.shutdownForReset();
   transactionSyncService.shutdown();
   posUserSyncService.shutdown();
+  settingsSyncService.shutdown();
   authService.shutdown();
 }
 
 // Database operations
+function getVoucherById(db: any, voucherId: string): any | null {
+  if (!voucherId) return null;
+  const row = db.prepare('SELECT * FROM vouchers WHERE id = ? OR cloud_id = ?').get(voucherId, voucherId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    cloudId: row.cloud_id || row.id,
+    name: row.name,
+    isActive: row.is_active === 1,
+    title: row.title || undefined,
+    subtitle: row.subtitle || undefined,
+    bodyText: row.body_text || undefined,
+    footerText: row.footer_text || undefined,
+    validityDays: row.validity_days ?? undefined,
+    valueDisplayMode: row.value_display_mode || 'product_price',
+    displayValue: row.display_value ?? undefined,
+    printBarcode: row.print_barcode === 1,
+    printQr: row.print_qr === 1,
+    language: row.language || 'he',
+    updatedAt: row.updated_at,
+  };
+}
+
+function getIssuedVouchersForTransaction(db: any, transactionId: string): any[] {
+  const rows = db.prepare('SELECT * FROM issued_vouchers WHERE transaction_id = ? ORDER BY issued_at').all(transactionId);
+  return rows.map((row: any) => ({
+    id: row.id,
+    transactionId: row.transaction_id,
+    transactionItemId: row.transaction_item_id || undefined,
+    voucherId: row.voucher_id || undefined,
+    productId: row.product_id || undefined,
+    productName: row.product_name || undefined,
+    quantity: row.quantity,
+    unitValue: row.unit_value ?? undefined,
+    faceValue: row.face_value ?? undefined,
+    issuedAt: row.issued_at,
+    expiresAt: row.expires_at || undefined,
+    status: row.status || 'issued',
+    reprintCount: row.reprint_count ?? 0,
+    lastPrintedAt: row.last_printed_at || undefined,
+  }));
+}
+
+function saveIssuedVouchers(db: any, transactionId: string, issued: any[]): void {
+  db.prepare('DELETE FROM issued_vouchers WHERE transaction_id = ?').run(transactionId);
+  if (!issued || issued.length === 0) return;
+  const stmt = db.prepare(`
+    INSERT INTO issued_vouchers
+    (id, transaction_id, transaction_item_id, voucher_id, product_id, product_name, quantity, unit_value, face_value,
+     issued_at, expires_at, status, reprint_count, last_printed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const iv of issued) {
+    stmt.run(
+      iv.id,
+      transactionId,
+      iv.transactionItemId || null,
+      iv.voucherId || null,
+      iv.productId || null,
+      iv.productName || null,
+      iv.quantity ?? 1,
+      iv.unitValue ?? null,
+      iv.faceValue ?? null,
+      iv.issuedAt,
+      iv.expiresAt || null,
+      iv.status || 'issued',
+      iv.reprintCount ?? 0,
+      iv.lastPrintedAt || null,
+    );
+  }
+}
+
+function incrementIssuedVoucherReprint(db: any, issuedId: string): any | null {
+  const row = db.prepare('SELECT * FROM issued_vouchers WHERE id = ?').get(issuedId);
+  if (!row) return null;
+  const now = new Date().toISOString();
+  const count = (row.reprint_count ?? 0) + 1;
+  db.prepare('UPDATE issued_vouchers SET reprint_count = ?, last_printed_at = ? WHERE id = ?').run(count, now, issuedId);
+  return getIssuedVouchersForTransaction(db, row.transaction_id).find((iv: any) => iv.id === issuedId) || null;
+}
+
 function getAllProducts(db: any): any[] {
   const rows = db.prepare('SELECT * FROM products ORDER BY name').all();
   return rows.map((row: any) => {
@@ -511,6 +780,8 @@ function getAllProducts(db: any): any[] {
     stockQuantity: 0,
     barcode: row.barcode || undefined,
     taxRate: row.taxRate || undefined,
+    voucherId: row.voucherId || undefined,
+    trackStock: row.track_stock === 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     cloud_id: row.cloud_id || undefined,
@@ -592,8 +863,14 @@ function saveCategory(db: any, category: any): void {
 }
 
 function readSettingMain(db: any, key: string): string | null {
-  const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
-  return r ? r.value : null;
+  if (!isSqliteOpen(db)) return null;
+  try {
+    const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    return r ? r.value : null;
+  } catch (e) {
+    console.warn(`[DB] readSettingMain(${key}) failed:`, e);
+    return null;
+  }
 }
 
 function isCloudSyncEnabledMain(db: any): boolean {
@@ -601,27 +878,56 @@ function isCloudSyncEnabledMain(db: any): boolean {
   return v === '1' || v === 'true';
 }
 
-/**
- * Periodic poller that asks the cloud "what's my merchant assignment?" while
- * we're paired but not yet assigned. Cleared as soon as we get an answer.
- *
- * Scenario: operator pairs the POS to a fresh machine that has no merchant
- * yet, then later assigns it via the dashboard. Without this poller we'd stay
- * stuck logging "no merchantId in settings" until the operator manually hits
- * the "Refresh merchant" button in Settings.
- */
-let merchantAssignmentPoll: NodeJS.Timeout | null = null;
+function isSqliteOpen(db: any): boolean {
+  return !!db && (typeof db.open !== 'boolean' || db.open);
+}
+
+/** MQTT topics use pos/{tenantId}/{machineId}/… — stored as cloud_tenant_id (legacy: cloud_merchant_id). */
+function readMqttTenantIdMain(db: any): string | null {
+  return (
+    readSettingMain(db, 'cloud_tenant_id')?.trim() ||
+    readSettingMain(db, 'cloud_merchant_id')?.trim() ||
+    null
+  );
+}
+
+function persistMachineContextMain(
+  db: any,
+  ctx: { tenantId: string | null; shopId: string | null },
+): void {
+  if (!isSqliteOpen(db)) return;
+  const put = (k: string, v: string) =>
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, v);
+  if (ctx.tenantId) {
+    put('cloud_tenant_id', ctx.tenantId);
+    put('cloud_merchant_id', ctx.tenantId);
+  }
+  if (ctx.shopId) {
+    put('cloud_shop_id', ctx.shopId);
+  }
+}
+
+function parseMachineMeResponse(data: unknown): { tenantId: string | null; shopId: string | null } {
+  const d = (data ?? {}) as Record<string, string | null | undefined>;
+  const tenantId = d.tenantId
+    ? String(d.tenantId)
+    : d.merchantId
+      ? String(d.merchantId)
+      : null;
+  const shopId = d.shopId ? String(d.shopId) : null;
+  return { tenantId, shopId };
+}
 
 function _doConnectMqttFromSettings(db: any): boolean {
   const host = readSettingMain(db, 'mqtt_cloud_host');
   const portStr = readSettingMain(db, 'mqtt_cloud_port');
-  const merchantId = readSettingMain(db, 'cloud_merchant_id');
+  const tenantId = readMqttTenantIdMain(db);
   const machineId = readSettingMain(db, 'cloud_machine_id');
   const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
   const accessToken = readSettingMain(db, 'cloud_access_token');
   if (
     !host?.trim() ||
-    !merchantId?.trim() ||
+    !tenantId ||
     !machineId?.trim() ||
     !apiBaseUrl?.trim() ||
     !accessToken?.trim()
@@ -637,7 +943,7 @@ function _doConnectMqttFromSettings(db: any): boolean {
     syncService.connect({
       host: host.trim(),
       port: Number.isFinite(port) && port > 0 ? port : 1883,
-      merchantId: merchantId.trim(),
+      merchantId: tenantId,
       machineId: machineId.trim(),
       apiBaseUrl: apiBaseUrl.trim(),
       accessToken: accessToken.trim(),
@@ -654,44 +960,54 @@ function _doConnectMqttFromSettings(db: any): boolean {
 }
 
 /**
- * One-shot fetch of /machines/me. Persists `cloud_merchant_id` (and
- * `cloud_shop_id` if we ever start using it) when the cloud reports an
- * assignment.
+ * Restore MQTT from SQLite after restart (`sync-connect` runs only during pairing).
+ * If tenant id is missing locally, backfill once from GET /machines/me (no polling).
  */
-function _fetchMerchantContext(
-  db: any,
-  cb: (got: { merchantId: string | null; shopId: string | null } | null) => void,
-): void {
-  syncService.init(db);
+function backfillTenantIdFromCloudOnce(db: any): void {
+  if (tenantBackfillInFlight) return;
+  if (!isSqliteOpen(db)) return;
+  tenantBackfillInFlight = true;
+  try {
+    syncService.init(db);
+  } catch (e) {
+    tenantBackfillInFlight = false;
+    console.warn('[Cloud] sync init before tenant backfill failed:', e);
+    return;
+  }
   syncService.cloudJson('GET', '/machines/me', null, (err, _status, data) => {
+    tenantBackfillInFlight = false;
     if (err) {
-      console.warn('[Cloud] /machines/me fetch failed:', err.message);
-      return cb(null);
+      if (!cloudTenantMissingLogged) {
+        cloudTenantMissingLogged = true;
+        console.warn('[Cloud] /machines/me backfill failed:', err.message);
+      }
+      return;
     }
-    const d = (data ?? {}) as Record<string, string | null | undefined>;
-    const merchantId = d.merchantId ? String(d.merchantId) : null;
-    const shopId = d.shopId ? String(d.shopId) : null;
-    if (merchantId && db.open) {
-      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
-        'cloud_merchant_id',
-        merchantId,
+    const ctx = parseMachineMeResponse(data);
+    if (ctx.tenantId || ctx.shopId) {
+      try {
+        if (isSqliteOpen(db)) {
+          persistMachineContextMain(db, ctx);
+          cloudTenantMissingLogged = false;
+        }
+      } catch (e) {
+        console.warn('[Cloud] failed to persist tenant backfill:', e);
+      }
+    }
+    const tenantId = readMqttTenantIdMain(db);
+    if (tenantId) {
+      _doConnectMqttFromSettings(db);
+      return;
+    }
+    if (!cloudTenantMissingLogged) {
+      cloudTenantMissingLogged = true;
+      console.warn(
+        '[Cloud] Paired but cloud_tenant_id is missing — re-pair or assign tenant in dashboard',
       );
-      console.log('[Cloud] /machines/me → merchantId=', merchantId, 'shopId=', shopId ?? '(none)');
     }
-    cb({ merchantId, shopId });
   });
 }
 
-/**
- * Restore MQTT + sync config from SQLite after restart (sync-connect is only
- * called during pairing). Self-heals when the machine has been paired but the
- * merchant assignment hasn't reached the local DB yet:
- *
- *   1. If `cloud_merchant_id` is missing, ping `/machines/me` once.
- *   2. If the cloud now reports a merchant, persist it and connect MQTT.
- *   3. Otherwise schedule a periodic re-check every 30s until we either get
- *      an assignment, the operator unpairs, or the app exits.
- */
 function tryReconnectCloudMqttFromDb(db: any): void {
   if (!isCloudSyncEnabledMain(db)) return;
   const host = readSettingMain(db, 'mqtt_cloud_host');
@@ -699,52 +1015,16 @@ function tryReconnectCloudMqttFromDb(db: any): void {
   const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
   const accessToken = readSettingMain(db, 'cloud_access_token');
   if (!host?.trim() || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
-    // Not paired yet (or unpaired). Nothing to reconnect; if a polling timer
-    // was running from a previous pairing, cancel it.
-    if (merchantAssignmentPoll) {
-      clearInterval(merchantAssignmentPoll);
-      merchantAssignmentPoll = null;
-    }
     return;
   }
 
-  const merchantId = readSettingMain(db, 'cloud_merchant_id');
-  if (merchantId?.trim()) {
-    _doConnectMqttFromSettings(db);
-    if (merchantAssignmentPoll) {
-      clearInterval(merchantAssignmentPoll);
-      merchantAssignmentPoll = null;
-    }
+  const tenantId = readMqttTenantIdMain(db);
+  if (!tenantId) {
+    backfillTenantIdFromCloudOnce(db);
     return;
   }
 
-  // Paired but unassigned — try to self-heal once immediately, then on a slow
-  // poll. This is the path that previously logged "MQTT reconnect skipped —
-  // no merchantId in settings" and gave up.
-  console.log('[Cloud] No merchantId yet — fetching /machines/me to check for assignment');
-  _fetchMerchantContext(db, (got) => {
-    if (got?.merchantId) {
-      _doConnectMqttFromSettings(db);
-      if (merchantAssignmentPoll) {
-        clearInterval(merchantAssignmentPoll);
-        merchantAssignmentPoll = null;
-      }
-      return;
-    }
-    if (merchantAssignmentPoll) return; // already polling
-    console.log('[Cloud] Machine not assigned yet — will recheck every 30s');
-    merchantAssignmentPoll = setInterval(() => {
-      _fetchMerchantContext(db, (g) => {
-        if (g?.merchantId) {
-          if (merchantAssignmentPoll) {
-            clearInterval(merchantAssignmentPoll);
-            merchantAssignmentPoll = null;
-          }
-          _doConnectMqttFromSettings(db);
-        }
-      });
-    }, 30000);
-  });
+  _doConnectMqttFromSettings(db);
 }
 
 function productToCloudPostPayload(product: any): Record<string, unknown> {
@@ -947,6 +1227,9 @@ function loadTransactionWithRelations(db: any, row: any): any {
     refundOfTransactionId: row.refundOfTransactionId || undefined,
     paymentMethod: row.paymentMethod || undefined,
     nayaxMeta: row.nayaxMeta || undefined,
+    tipAmount: row.tipAmount ?? undefined,
+    tipPaymentMethod: row.tipPaymentMethod || undefined,
+    issuedVouchers: getIssuedVouchersForTransaction(db, row.id),
   };
 }
 
@@ -1041,6 +1324,15 @@ function getTransactionsPage(db: any, options: any): { transactions: any[]; tota
   return { transactions, total };
 }
 
+function getRefundsForOriginal(db: any, originalTransactionId: string): any[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM transactions WHERE refundOfTransactionId = ? ORDER BY createdAt ASC',
+    )
+    .all(originalTransactionId);
+  return rows.map((row: any) => loadTransactionWithRelations(db, row));
+}
+
 function saveTransaction(db: any, transaction: any): void {
   const trans = db.transaction(() => {
     // Resolve current open trading day so the cloud can group transactions per shift.
@@ -1053,8 +1345,8 @@ function saveTransaction(db: any, transaction: any): void {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO transactions 
       (id, transactionNumber, customerId, status, receiptUrl, notes, cashierId, documentType, 
-       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, tradingDayId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       documentProductionDate, branchId, documentDiscount, whtDeduction, amountTendered, changeAmount, refundOfTransactionId, paymentMethod, nayaxMeta, tradingDayId, tipAmount, tipPaymentMethod, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -1076,6 +1368,8 @@ function saveTransaction(db: any, transaction: any): void {
       transaction.paymentMethod || null,
       transaction.nayaxMeta || null,
       tradingDayId,
+      transaction.tipAmount ?? 0,
+      transaction.tipPaymentMethod || null,
       transaction.createdAt,
       transaction.updatedAt
     );
@@ -1104,6 +1398,10 @@ function saveTransaction(db: any, transaction: any): void {
         item.lineDiscount || null,
         item.notes || null
       );
+    }
+
+    if (transaction.issuedVouchers && transaction.issuedVouchers.length > 0) {
+      saveIssuedVouchers(db, transaction.id, transaction.issuedVouchers);
     }
   });
   
@@ -1624,6 +1922,19 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  if (powerMonitor) {
+    powerMonitor.on('suspend', () => {
+      try {
+        pauseDatabaseForSystemSleep();
+      } catch (e) {
+        console.warn('[DB] pause on sleep failed:', e);
+      }
+    });
+    powerMonitor.on('resume', () => {
+      scheduleResumeDatabaseAfterSystemWake();
+    });
+  }
   
   // Set application menu
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -1677,6 +1988,12 @@ app.whenReady().then(() => {
 // Handle IPC messages
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('app-restart', () => {
+  app.relaunch();
+  app.quit();
+  return { success: true };
 });
 
 ipcMain.handle('get-heebo-font-css', () => {
@@ -1867,8 +2184,11 @@ ipcMain.handle('print-test', async (event, printerName) => {
   }
 });
 
-/** Print HTML content to the OS default printer (silent). */
-async function printHtmlToDefaultPrinter(html: string): Promise<{ success: boolean; printed?: boolean; error?: string }> {
+/** Print HTML content to a named printer (silent). Omits deviceName when printerName is empty. */
+async function printHtmlToPrinter(
+  html: string,
+  printerName?: string,
+): Promise<{ success: boolean; printed?: boolean; error?: string }> {
   if (!win) {
     return { success: false, error: 'Application window not ready' };
   }
@@ -1905,6 +2225,14 @@ async function printHtmlToDefaultPrinter(html: string): Promise<{ success: boole
       copies: 1,
     };
 
+    if (printerName && printerName.trim()) {
+      const match = printers.find((p: { name: string }) => p.name === printerName);
+      if (!match) {
+        return { success: false, error: `Printer not found: ${printerName}` };
+      }
+      printOptions.deviceName = printerName;
+    }
+
     return await new Promise((resolve) => {
       printWindow.webContents.print(printOptions, (success, failureReason) => {
         printWindow.close();
@@ -1928,16 +2256,128 @@ async function printHtmlToDefaultPrinter(html: string): Promise<{ success: boole
   }
 }
 
-ipcMain.handle('print-receipt', async (_event, payload: ReceiptPrintPayload) => {
+/** @deprecated Use printHtmlToPrinter without a name for OS default. */
+async function printHtmlToDefaultPrinter(html: string) {
+  return printHtmlToPrinter(html);
+}
+
+const INTEGRATION_LOG_TYPE_DRAWER = 'cash_drawer';
+
+function buildDrawerKickHtml(cashierName: string, language: 'he' | 'en'): string {
+  const title = language === 'he' ? 'פתיחת מגירה' : 'Cash drawer open';
+  const when = new Date().toLocaleString(language === 'he' ? 'he-IL' : 'en-IL');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 12px; font-size: 12pt; }
+  </style></head><body>
+    <p><strong>${title}</strong></p>
+    <p>${cashierName}</p>
+    <p>${when}</p>
+  </body></html>`;
+}
+
+ipcMain.handle('print-receipt', async (_event, payload: ReceiptPrintPayload & { printerName?: string }) => {
   try {
     if (!payload?.transaction?.cart?.items) {
       return { success: false, error: 'Invalid receipt payload' };
     }
     const html = buildReceiptHtml(payload);
-    return await printHtmlToDefaultPrinter(html);
+    return await printHtmlToPrinter(html, payload.printerName);
   } catch (error: any) {
     console.error('[IPC] print-receipt error:', error);
     return { success: false, error: error.message || 'Failed to print receipt' };
+  }
+});
+
+ipcMain.handle(
+  'open-cash-drawer',
+  async (
+    _event,
+    payload: { printerName?: string; cashierName?: string; language?: 'he' | 'en' },
+  ) => {
+    const db = getDatabaseMain();
+    const printerName = (payload?.printerName || '').trim();
+    const cashierName = (payload?.cashierName || '').trim() || 'Cashier';
+    const language = payload?.language === 'en' ? 'en' : 'he';
+
+    if (!printerName) {
+      const err = 'Drawer printer not configured';
+      try {
+        insertIntegrationLog(db, {
+          type: INTEGRATION_LOG_TYPE_DRAWER,
+          method: 'open_manual',
+          requestJson: JSON.stringify({ cashierName }),
+          responseJson: JSON.stringify({ error: err }),
+          outcome: 'error',
+        });
+      } catch {
+        /* ignore */
+      }
+      return { success: false, error: err };
+    }
+
+    const html = buildDrawerKickHtml(cashierName, language);
+    const result = await printHtmlToPrinter(html, printerName);
+    try {
+      insertIntegrationLog(db, {
+        type: INTEGRATION_LOG_TYPE_DRAWER,
+        method: 'open_manual',
+        requestJson: JSON.stringify({ cashierName, printerName }),
+        responseJson: JSON.stringify(result),
+        outcome: result.success ? 'ok' : 'error',
+      });
+    } catch (logErr) {
+      console.error('insertIntegrationLog (open-cash-drawer):', logErr);
+    }
+    return result;
+  },
+);
+
+ipcMain.handle('print-voucher', async (_event, payload: VoucherPrintPayload) => {
+  try {
+    if (!payload?.issued?.id || !payload?.voucher?.name) {
+      return { success: false, error: 'Invalid voucher payload' };
+    }
+    const html = buildVoucherHtml(payload);
+    return await printHtmlToDefaultPrinter(html);
+  } catch (error: any) {
+    console.error('[IPC] print-voucher error:', error);
+    return { success: false, error: error.message || 'Failed to print voucher' };
+  }
+});
+
+ipcMain.handle('db-get-voucher', async (_event, voucherId: string) => {
+  try {
+    if (!dbInstance || !voucherId) return null;
+    return getVoucherById(dbInstance, voucherId);
+  } catch (error: any) {
+    console.error('[IPC] db-get-voucher error:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('increment-issued-voucher-reprint', async (_event, issuedId: string) => {
+  try {
+    if (!dbInstance || !issuedId) return null;
+    return incrementIssuedVoucherReprint(dbInstance, issuedId);
+  } catch (error: any) {
+    console.error('[IPC] increment-issued-voucher-reprint error:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('db-save-issued-vouchers', async (_event, transactionId: string, issued: any[]) => {
+  try {
+    const db = getDatabaseMain();
+    saveIssuedVouchers(db, transactionId, issued);
+    try {
+      transactionSyncService.enqueueTransaction(transactionId);
+    } catch (e) {
+      console.error('[TxSync] enqueue after issued vouchers failed', e);
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error('[IPC] db-save-issued-vouchers error:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -2590,6 +3030,17 @@ ipcMain.handle('db-get-transactions-page', async (event, options: any) => {
   }
 });
 
+ipcMain.handle('db-get-refunds-for-original', async (_event, originalTransactionId: string) => {
+  try {
+    const db = getDatabaseMain();
+    if (!originalTransactionId) return [];
+    return getRefundsForOriginal(db, originalTransactionId);
+  } catch (error: any) {
+    console.error('Error getting refunds for original transaction:', error);
+    return [];
+  }
+});
+
 ipcMain.handle('db-delete-all-transactions', async () => {
   try {
     const db = getDatabaseMain();
@@ -2599,6 +3050,132 @@ ipcMain.handle('db-delete-all-transactions', async () => {
   } catch (error: any) {
     console.error('Error deleting all transactions:', error);
     return { success: false, error: error.message };
+  }
+});
+
+function getEffectiveOnHand(db: any, productId: string): number | null {
+  const product = db.prepare('SELECT id, track_stock FROM products WHERE id = ?').get(productId) as
+    | { id: string; track_stock?: number }
+    | undefined;
+  if (!product || product.track_stock !== 1) return null;
+
+  const level = db
+    .prepare('SELECT base_quantity FROM stock_levels WHERE product_id = ?')
+    .get(productId) as { base_quantity?: number } | undefined;
+  const base = level?.base_quantity ?? 0;
+
+  const unsynced = db
+    .prepare(
+      'SELECT COALESCE(SUM(delta), 0) AS total FROM stock_movements WHERE product_id = ? AND synced = 0',
+    )
+    .get(productId) as { total?: number } | undefined;
+  return base + (unsynced?.total ?? 0);
+}
+
+function applySaleStockMovements(db: any, transaction: any): void {
+  if (!transaction?.cart?.items?.length) return;
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO stock_movements
+    (id, product_id, delta, reason, transaction_id, transaction_item_id, synced, occurred_at, created_at)
+    VALUES (?, ?, ?, 'sale', ?, ?, 0, ?, ?)
+  `);
+
+  for (const item of transaction.cart.items) {
+    const pid = item.productId || item.product?.id;
+    if (!pid) continue;
+    const product = db.prepare('SELECT track_stock FROM products WHERE id = ?').get(pid) as
+      | { track_stock?: number }
+      | undefined;
+    if (!product || product.track_stock !== 1) continue;
+
+    const qty = Number(item.quantity) || 0;
+    if (qty <= 0) continue;
+    const movementId = newIntegrationLogId();
+    insert.run(
+      movementId,
+      pid,
+      -qty,
+      transaction.id,
+      item.id ?? null,
+      transaction.createdAt || now,
+      now,
+    );
+  }
+}
+
+function applyRefundStockMovements(db: any, transaction: any): void {
+  if (!transaction?.cart?.items?.length || !transaction.refundOfTransactionId) return;
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO stock_movements
+    (id, product_id, delta, reason, transaction_id, transaction_item_id, synced, occurred_at, created_at)
+    VALUES (?, ?, ?, 'refund', ?, ?, 0, ?, ?)
+  `);
+
+  for (const item of transaction.cart.items) {
+    const pid = item.productId || item.product?.id;
+    if (!pid) continue;
+    const product = db.prepare('SELECT track_stock FROM products WHERE id = ?').get(pid) as
+      | { track_stock?: number }
+      | undefined;
+    if (!product || product.track_stock !== 1) continue;
+
+    const qty = Number(item.quantity) || 0;
+    if (qty <= 0) continue;
+    const movementId = newIntegrationLogId();
+    insert.run(
+      movementId,
+      pid,
+      qty,
+      transaction.id,
+      item.id ?? null,
+      transaction.createdAt || now,
+      now,
+    );
+  }
+}
+
+function checkStockForAdd(
+  db: any,
+  productId: string,
+  quantity: number,
+): { allowed: boolean; warn?: boolean; onHand?: number | null } {
+  const onHand = getEffectiveOnHand(db, productId);
+  if (onHand === null) return { allowed: true, onHand: null };
+
+  const policyRow = db.prepare("SELECT value FROM settings WHERE key = 'outOfStockPolicy'").get() as
+    | { value?: string }
+    | undefined;
+  const policy = policyRow?.value || 'allow';
+
+  if (onHand - quantity >= 0) {
+    return { allowed: true, onHand };
+  }
+  if (policy === 'block') {
+    return { allowed: false, onHand };
+  }
+  if (policy === 'warn') {
+    return { allowed: true, warn: true, onHand };
+  }
+  return { allowed: true, onHand };
+}
+
+ipcMain.handle('db-check-stock-for-add', async (_event, productId: string, quantity: number) => {
+  try {
+    const db = getDatabaseMain();
+    return { success: true, ...checkStockForAdd(db, productId, quantity) };
+  } catch (error: any) {
+    return { success: false, allowed: true, error: error.message };
+  }
+});
+
+ipcMain.handle('db-get-effective-on-hand', async (_event, productId: string) => {
+  try {
+    const db = getDatabaseMain();
+    return { success: true, onHand: getEffectiveOnHand(db, productId) };
+  } catch (error: any) {
+    return { success: false, onHand: null, error: error.message };
   }
 });
 
@@ -2613,6 +3190,18 @@ ipcMain.handle('db-save-transaction', async (event, transaction: any) => {
       documentProductionDate: transaction.documentProductionDate || new Date().toISOString(),
     };
     saveTransaction(db, tx);
+
+    if (tx.status && tx.status !== 'pending') {
+      try {
+        if (tx.refundOfTransactionId) {
+          applyRefundStockMovements(db, tx);
+        } else {
+          applySaleStockMovements(db, tx);
+        }
+      } catch (e) {
+        console.error('[Stock] apply stock movements failed', e);
+      }
+    }
 
     // Real-time push: enqueue + nudge a flush. Skip business-pending rows (card capture in flight).
     if (tx.status && tx.status !== 'pending') {
@@ -2688,12 +3277,34 @@ ipcMain.handle('cloud-sync-online-hint', async () => {
 ipcMain.handle('cloud-z-close', async (_event, zPayload: Record<string, unknown>) => {
   try {
     const r = await transactionSyncService.closeDayWithCloud(zPayload);
-    if (r.ok) return { success: true, status: r.status };
+    if (r.ok) return { success: true, status: r.status, zReportId: r.zReportId };
     return { success: false, error: r.error, missingIds: r.missingIds, httpStatus: r.httpStatus };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle(
+  'cloud-close-day-ack',
+  async (
+    _event,
+    payload: {
+      requestId: string;
+      phase: 'received' | 'completed' | 'failed';
+      zReportId?: string;
+      errorCode?: string;
+      errorMessage?: string;
+    },
+  ) => {
+    try {
+      const r = await transactionSyncService.postCloseDayAck(payload);
+      if (r.ok) return { success: true };
+      return { success: false, error: r.error };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  },
+);
 
 /** Purge a closed day's local transactions (called after successful Z save). */
 ipcMain.handle('cloud-purge-closed-day', async (_event, tradingDayId: string) => {
@@ -2741,6 +3352,14 @@ ipcMain.handle('pos-users-has-any', async () => {
     return { success: true, hasAny: posUserSyncService.hasAnyActive() };
   } catch (error: any) {
     return { success: false, hasAny: false, error: error.message };
+  }
+});
+
+ipcMain.handle('settings-sync-now', async () => {
+  try {
+    return await settingsSyncService.pullSettingsImmediate();
+  } catch (error: any) {
+    return { ok: false, error: error.message };
   }
 });
 
@@ -3050,6 +3669,129 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'nayax-do-refund',
+  async (
+    _event: unknown,
+    payload: { amountAgorot: number; vuid: string; originalTransactionId: string },
+  ) => {
+    const db = getDatabaseMain();
+    try {
+      const conn = getNayaxConnectionFromDb(db);
+      if ('error' in conn) {
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: conn.error,
+        };
+      }
+      const amountAgorot = Math.round(payload.amountAgorot);
+      if (!Number.isFinite(amountAgorot) || amountAgorot < 1) {
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: 'Invalid refund amount',
+        };
+      }
+      const vuidRaw = typeof payload.vuid === 'string' ? payload.vuid.trim() : '';
+      const originalTransactionId =
+        typeof payload.originalTransactionId === 'string'
+          ? payload.originalTransactionId.trim()
+          : '';
+      if (!vuidRaw || !originalTransactionId) {
+        return {
+          approved: false,
+          outcome: 'declined' as const,
+          vuid: '',
+          error: 'vuid and originalTransactionId are required',
+        };
+      }
+      const params = [
+        'ashrait',
+        {
+          vuid: vuidRaw,
+          tranType: 53,
+          tranCode: 1,
+          creditTerms: 1,
+          amount: amountAgorot,
+          currency: '376',
+          originalTransactionId,
+        },
+      ];
+      const requestPayload = {
+        endpoint: {
+          host: conn.host,
+          port: conn.port,
+          path: normalizeNayaxPath(conn.path),
+        },
+        jsonrpc: { method: 'doTransaction', params, id: vuidRaw },
+      };
+      const rpcResult = await callNayaxJsonRpc({
+        host: conn.host,
+        port: conn.port,
+        path: conn.path,
+        method: 'doTransaction',
+        params,
+        id: vuidRaw,
+        timeoutMs: DEFAULT_NAYAX_TRANSACTION_TIMEOUT_MS,
+      });
+      const responseForLog =
+        rpcResult.ok === true
+          ? { ok: true as const, result: rpcResult.result, id: rpcResult.id }
+          : {
+              ok: false as const,
+              error: rpcResult.error,
+              code: rpcResult.code,
+              data: rpcResult.data,
+            };
+      const parsed = parseAshraitDoTransactionResult(rpcResult);
+      try {
+        insertIntegrationLog(db, {
+          type: INTEGRATION_LOG_TYPE_NAYAX,
+          method: 'doTransactionRefund',
+          requestJson: JSON.stringify(requestPayload),
+          responseJson: JSON.stringify(responseForLog),
+          outcome: parsed.outcome,
+        });
+      } catch (logErr) {
+        console.error('insertIntegrationLog (doTransactionRefund):', logErr);
+      }
+      if (parsed.approved) {
+        return {
+          approved: true,
+          outcome: parsed.outcome,
+          vuid: vuidRaw,
+          result: rpcResult.ok ? rpcResult.result : undefined,
+          statusCode: parsed.statusCode,
+          statusMessage: parsed.statusMessage,
+          message: parsed.message,
+        };
+      }
+      return {
+        approved: false,
+        outcome: parsed.outcome,
+        vuid: vuidRaw,
+        error: parsed.message,
+        statusCode: parsed.statusCode,
+        statusMessage: parsed.statusMessage,
+        result: rpcResult.ok ? rpcResult.result : undefined,
+      };
+    } catch (error: any) {
+      if (error.message === 'Database not initialized') {
+        return { approved: false, outcome: 'declined' as const, vuid: '', error: 'Database not initialized' };
+      }
+      return {
+        approved: false,
+        outcome: 'declined' as const,
+        vuid: '',
+        error: error.message || 'Unknown error',
+      };
+    }
+  },
+);
+
+ipcMain.handle(
   'nayax-abort-transaction',
   async (_event: unknown, payload: { vuid: string }) => {
     const db = getDatabaseMain();
@@ -3214,26 +3956,72 @@ ipcMain.handle(
         return { success: false, error: r.error, statusCode: r.statusCode };
       }
       const d = r.data;
-      const broker = String(d.mqttBrokerUrl || '');
-      const { host, port } = parseMqttBrokerUrl(broker);
-      const apiBaseUrl = normalizeApiBaseUrl(payload.apiBaseUrl);
       return {
         success: true,
-        apiBaseUrl,
-        machineId: String(d.machineId ?? ''),
-        merchantId: d.merchantId != null && d.merchantId !== '' ? String(d.merchantId) : '',
-        shopId: d.shopId != null && d.shopId !== '' ? String(d.shopId) : '',
-        accessToken: String(d.accessToken ?? ''),
-        mqttClientId: String(d.mqttClientId ?? ''),
-        mqttUsername: String(d.mqttUsername ?? ''),
-        mqttPassword: String(d.mqttPassword ?? ''),
-        machineCode: String(d.machineCode ?? ''),
-        mqttHost: host,
-        mqttPort: port,
+        ...pairingCredentialsFromValidateData(d, payload.apiBaseUrl),
       };
     } catch (e: any) {
       console.error('[IPC] cloud-pairing-validate error:', e);
       return { success: false, error: e?.message || 'Pairing failed' };
+    }
+  },
+);
+
+ipcMain.handle(
+  'cloud-device-register',
+  async (
+    _event,
+    payload: { apiBaseUrl: string; machineName?: string },
+  ): Promise<Record<string, unknown>> => {
+    try {
+      if (!payload?.apiBaseUrl?.trim()) {
+        return { success: false, error: 'API URL is required' };
+      }
+      const r = await postDeviceRegister(payload.apiBaseUrl, {
+        machine_name: payload.machineName?.trim() || undefined,
+      });
+      if (!r.ok) {
+        return { success: false, error: r.error, statusCode: r.statusCode };
+      }
+      const d = r.data;
+      return {
+        success: true,
+        deviceNonce: String(d.deviceNonce ?? ''),
+        expiresAt: String(d.expiresAt ?? ''),
+        apiBaseUrl: normalizeApiBaseUrl(payload.apiBaseUrl),
+      };
+    } catch (e: any) {
+      console.error('[IPC] cloud-device-register error:', e);
+      return { success: false, error: e?.message || 'Register failed' };
+    }
+  },
+);
+
+ipcMain.handle(
+  'cloud-device-poll-status',
+  async (
+    _event,
+    payload: { apiBaseUrl: string; deviceNonce: string },
+  ): Promise<Record<string, unknown>> => {
+    try {
+      if (!payload?.apiBaseUrl?.trim() || !payload?.deviceNonce?.trim()) {
+        return { success: false, error: 'API URL and device nonce are required' };
+      }
+      const r = await getDevicePollStatus(payload.apiBaseUrl, payload.deviceNonce.trim());
+      if (!r.ok) {
+        if (r.statusCode === 410) {
+          return { success: true, status: 'gone', error: r.error };
+        }
+        return { success: false, error: r.error, statusCode: r.statusCode };
+      }
+      if (r.data.status === 'waiting') {
+        return { success: true, status: 'waiting' };
+      }
+      const creds = pairingCredentialsFromValidateData(r.data, payload.apiBaseUrl);
+      return { success: true, status: 'credentials', ...creds };
+    } catch (e: any) {
+      console.error('[IPC] cloud-device-poll-status error:', e);
+      return { success: false, error: e?.message || 'Poll failed' };
     }
   },
 );
@@ -3248,7 +4036,15 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     if (config.accessToken) put('cloud_access_token', String(config.accessToken));
     if (config.machineId) put('cloud_machine_id', String(config.machineId));
     if (config.machineCode) put('cloud_machine_code', String(config.machineCode));
-    if (config.merchantId != null) put('cloud_merchant_id', String(config.merchantId || ''));
+    const tenantId = String(config.tenantId ?? config.merchantId ?? '').trim();
+    if (!tenantId) {
+      return { success: false, error: 'tenantId is required — pair again from onboarding' };
+    }
+    put('cloud_tenant_id', tenantId);
+    put('cloud_merchant_id', tenantId);
+    if (config.shopId != null && String(config.shopId).trim()) {
+      put('cloud_shop_id', String(config.shopId));
+    }
     put('cloud_sync_enabled', '1');
     if (config.host) put('mqtt_cloud_host', String(config.host));
     if (config.port != null) put('mqtt_cloud_port', String(config.port));
@@ -3262,7 +4058,7 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     syncService.connect({
       host: String(config.host),
       port: Number(config.port) || 1883,
-      merchantId: String(config.merchantId || ''),
+      merchantId: tenantId || String(config.merchantId || ''),
       machineId: String(config.machineId),
       apiBaseUrl: String(config.apiBaseUrl),
       accessToken: String(config.accessToken),
@@ -3303,12 +4099,6 @@ ipcMain.handle('sync-disconnect', async () => {
  */
 ipcMain.handle('cloud-unpair', async () => {
   try {
-    // Cancel the merchant-assignment poller in case we were paired-but-unassigned
-    // and the operator decided to unpair before the cloud assigned a merchant.
-    if (merchantAssignmentPoll) {
-      clearInterval(merchantAssignmentPoll);
-      merchantAssignmentPoll = null;
-    }
     syncService.disconnect();
     const db = getDatabaseMain();
     const clear = (key: string) =>
@@ -3319,7 +4109,9 @@ ipcMain.handle('cloud-unpair', async () => {
       'cloud_access_token',
       'cloud_machine_id',
       'cloud_machine_code',
+      'cloud_tenant_id',
       'cloud_merchant_id',
+      'cloud_shop_id',
       'mqtt_cloud_host',
       'mqtt_cloud_port',
       'mqtt_cloud_client_id',
@@ -3367,14 +4159,20 @@ ipcMain.handle('sync-refresh-machine-context', async () => {
         if (err) {
           return resolve({ success: false, error: err.message });
         }
-        const d = data as Record<string, string | null> | null;
-        if (d && d.merchantId) {
-          db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
-            'cloud_merchant_id',
-            String(d.merchantId),
-          );
+        const ctx = parseMachineMeResponse(data);
+        try {
+          if (isSqliteOpen(db) && (ctx.tenantId || ctx.shopId)) {
+            persistMachineContextMain(db, ctx);
+          }
+        } catch (persistErr) {
+          console.warn('[Cloud] sync-refresh-machine-context persist failed:', persistErr);
         }
-        resolve({ success: true, merchantId: d?.merchantId ?? null, shopId: d?.shopId ?? null });
+        resolve({
+          success: true,
+          tenantId: ctx.tenantId,
+          merchantId: ctx.tenantId,
+          shopId: ctx.shopId,
+        });
       });
     });
   } catch (error: any) {

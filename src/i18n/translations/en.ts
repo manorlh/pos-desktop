@@ -28,6 +28,7 @@ export const en = {
     all: 'All',
     yes: 'Yes',
     no: 'No',
+    continue: 'Continue',
     off: 'off',
   },
   
@@ -49,6 +50,9 @@ export const en = {
     stock: 'Stock',
     notForSale: 'Not for sale',
     outOfStockShort: 'Out of stock',
+    stockOnHand: 'On hand: {{qty}}',
+    stockBlockMessage: 'This item is out of stock and cannot be added to the cart.',
+    stockWarnMessage: 'Only {{onHand}} left in stock. Add anyway?',
   },
   
   // Checkout
@@ -77,6 +81,10 @@ export const en = {
     check: 'Check',
     digital: 'Digital Payment',
     giftCard: 'Gift Card',
+    tip: 'Tip',
+    noTip: 'No tip',
+    customTip: 'Custom tip',
+    grandTotal: 'Total due',
   },
   
   // Products
@@ -150,6 +158,7 @@ export const en = {
     paymentMethod: 'Payment Method',
     payment: 'Payment',
     cash: 'Cash',
+    card: 'Card',
     viewDetails: 'View Details',
     noTransactions: 'No transactions found',
     searchPlaceholder: 'Search transactions...',
@@ -171,6 +180,10 @@ export const en = {
     previous: 'Previous',
     next: 'Next',
     refund: 'Refund',
+    reprintReceipt: 'Reprint receipt (copy)',
+    reprintRefundReceipt: 'Reprint refund receipt',
+    reprintVoucher: 'Reprint voucher (copy)',
+    vouchersIssued: 'Issued vouchers',
     refundFull: 'Full Refund',
     refundPartial: 'Partial Refund',
     amountReturned: 'Amount to Return',
@@ -324,6 +337,16 @@ export const en = {
     cleanDatabaseFailed: 'Could not reset the database.',
     cleanDatabaseWorking: 'Erasing…',
     nayaxTitle: 'Nayax card terminal',
+    printersTitle: 'Receipt printers',
+    printersDesc:
+      'Choose Windows printer names on this device. Cloud defaults apply when local override is empty.',
+    printersCloudReceipt: 'Cloud receipt printer',
+    printersCloudDrawer: 'Cloud drawer printer',
+    printersLocalReceipt: 'Local receipt printer override',
+    printersLocalDrawer: 'Local drawer printer override',
+    printersUseCloud: 'Use cloud default',
+    printersRefresh: 'Refresh printer list',
+    printersNoneFound: 'No printers detected on this device.',
     nayaxDesc: 'Connect to a Nayax device on your network for credit card payments (JSON-RPC on port 8080 by default).',
     nayaxEnable: 'Enable card payments',
     nayaxHost: 'Device IP or hostname',
@@ -340,7 +363,7 @@ export const en = {
     cloudSyncDesc:
       'Connect this terminal to the POS cloud server. Generate a pairing code in the web dashboard (distributor), then enter it here. Assign the machine to a merchant in the dashboard before expecting catalog sync.',
     cloudApiBase: 'Server API base URL',
-    cloudApiBasePlaceholder: 'https://dabd-5-29-19-54.ngrok-free.app',
+    cloudApiBasePlaceholder: 'https://pos-cloud-api.fly.dev/api/v1',
     cloudApiBaseHint: 'Host and port only is fine; /api/v1 is added if missing.',
     cloudPairingCode: 'Pairing code',
     cloudPairingCodePlaceholder: 'Code from dashboard',
@@ -352,7 +375,12 @@ export const en = {
     cloudRefreshMerchantHint:
       'Use after the distributor assigned this machine to a merchant in the dashboard. Then pull catalog or wait for notify.',
     cloudPullCatalog: 'Pull catalog now',
-    cloudPullOk: 'Catalog pulled: {products} products, {categories} categories.',
+    cloudPullSettings: 'Pull settings now',
+    cloudSettingsPullOk: 'Settings synced from cloud.',
+    cloudSettingsPullFailed: 'Settings pull failed',
+    cloudManagedNote:
+      'Tax, language, stock display, and Nayax options are managed in the web dashboard for this paired terminal.',
+    cloudPullOk: 'Catalog pulled: {{products}} products, {{categories}} categories.',
     cloudPullFailed: 'Catalog pull failed',
     cloudDisconnect: 'Disconnect cloud',
     cloudStatus: 'Status',
@@ -420,17 +448,28 @@ export const en = {
     dayClosed: 'Day Closed',
     zReport: 'Z-Report',
     zReportTitle: 'End of Day Z-Report',
+    xReport: 'X-Report',
+    xReportTitle: 'X-Report — Mid-Shift Snapshot',
+    xReportSubtitle: 'Read-only — the day stays open and totals are not reset',
+    xReportNoDayOpen: 'No trading day is open. Open a day to view an X-Report.',
+    currentExpectedCash: 'Expected cash in drawer now',
+    generatedAt: 'Generated at',
     totalSales: 'Total Sales',
     totalTransactions: 'Total Transactions',
     totalItems: 'Total Items',
     cashSales: 'Cash Sales',
     taxCollected: 'Tax Collected',
+    totalTips: 'Total tips',
+    cashTips: 'Cash tips',
+    cardTips: 'Card tips',
     openedBy: 'Opened By',
     closedBy: 'Closed By',
     openedAt: 'Opened At',
     closedAt: 'Closed At',
     confirmOpen: 'Confirm Open Day',
     confirmClose: 'Confirm Close Day',
+    remoteCloseBanner: 'Close requested remotely by {name}',
+    remoteCloseUnknown: 'cloud operator',
     dayAlreadyOpen: 'Day is already open',
     dayAlreadyClosed: 'Day is already closed',
     noDayOpen: 'No trading day is currently open',
@@ -448,6 +487,11 @@ export const en = {
   },
   refund: {
     crossDayNotSupported: 'Cross-day refunds are not supported in this version',
+    nothingRemaining: 'Nothing left to refund on this transaction',
+    selectAtLeastOne: 'Select at least one item to refund',
+    cardMissingOriginalTxn: 'Cannot refund card payment: original terminal transaction ID is missing',
+    cardNotConfigured: 'Card terminal is not configured for refunds',
+    cardDeclined: 'Card refund was not approved by the terminal',
   },
 
   // Login screen
@@ -486,7 +530,7 @@ export const en = {
     pairingFailed: 'Pairing failed',
     pairingOk: 'Register paired',
     syncUsersBtn: 'Sync now',
-    syncUsersOk: 'Synced {count} users',
+    syncUsersOk: 'Synced {{count}} users',
     syncUsersFailed: 'User sync failed',
     pairedSummary: 'This register is paired to the cloud',
     machineCodeLabel: 'Register code',
@@ -496,6 +540,16 @@ export const en = {
     repairing: 'Disconnecting...',
     syncReturnedZero:
       'No active POS users were found in the cloud for this shop. Create POS users in the dashboard (Shops ▸ POS users), then sync again.',
+    pairModeQr: 'Scan from phone',
+    pairModeCode: 'Pairing code',
+    qrHint: 'Scan this QR from the installer phone (field install in the dashboard). Enter the register name on the phone.',
+    qrWaiting: 'Waiting for phone scan...',
+    qrRefresh: 'Refresh QR',
+    qrExpiresIn: 'QR valid for {{minutes}} more minutes',
+    qrExpired: 'QR expired — tap Refresh QR',
+    qrRegisterFailed: 'Failed to create QR',
+    welcomeSubtitle: 'Connect this register to the cloud and get started. Setup takes just a few steps.',
+    startInstallBtn: 'Start installation',
   },
 
   technician: {
@@ -518,6 +572,37 @@ export const en = {
     printFailedTitle: 'Print error',
     printFailed: 'Receipt did not print. Check the printer.',
     printFailedDetail: 'Details: {{reason}}',
+  },
+
+  printer: {
+    openDrawer: 'Open drawer',
+    openDrawerTitle: 'Open cash drawer',
+    openDrawerDesc: 'Enter your cashier PIN to open the cash drawer.',
+    openDrawerConfirm: 'Open',
+    openDrawerFailed: 'Could not open the cash drawer.',
+    drawerNotConfigured: 'Drawer printer is not configured.',
+    drawerOpenFailed: 'Receipt printed but the drawer did not open.',
+    drawerWarningTitle: 'Cash drawer issue',
+    drawerWarningBody:
+      'The receipt was printed, but the cash drawer may not have opened. Check printer configuration.',
+  },
+
+  voucher: {
+    issueFailedTitle: 'Voucher not issued',
+    templateMissing:
+      'The voucher template for "{{product}}" was not found or is inactive. The sale was completed, but no voucher was issued to the customer.',
+    printFailed: 'Voucher did not print. Check the printer.',
+    reprintFailed: 'Voucher copy print failed',
+  },
+
+  app: {
+    initializing: 'Initializing application...',
+    initErrorTitle: 'Initialization Error',
+    initErrorHint:
+      'This can happen after the Mac wakes from sleep. Try again or restart the application.',
+    initRetry: 'Try again',
+    initRestart: 'Restart application',
+    initSettingsHint: 'If this keeps happening, check the database path in Settings.',
   },
 };
 

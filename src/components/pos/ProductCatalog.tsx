@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Grid, List } from 'lucide-react';
 import { useProductStore } from '@/stores/useProductStore';
 import { useCartStore } from '@/stores/useCartStore';
@@ -16,6 +16,7 @@ function productImageSrc(product: { displayImageSrc?: string; imageUrl?: string 
 
 export function ProductCatalog() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [onHandMap, setOnHandMap] = useState<Record<string, number>>({});
   const { 
     filteredProducts, 
     categories, 
@@ -27,13 +28,57 @@ export function ProductCatalog() {
   const { addItem } = useCartStore();
   const { t, locale } = useI18n();
 
+  useEffect(() => {
+    if (!window.electronAPI?.dbGetEffectiveOnHand) return;
+    const tracked = filteredProducts.filter((p) => p.trackStock);
+    if (tracked.length === 0) {
+      setOnHandMap({});
+      return;
+    }
+    void Promise.all(
+      tracked.map(async (p) => {
+        const res = await window.electronAPI!.dbGetEffectiveOnHand(p.id);
+        return [p.id, res.onHand] as const;
+      }),
+    ).then((rows) => {
+      const map: Record<string, number> = {};
+      for (const [id, qty] of rows) {
+        if (qty != null) map[id] = qty;
+      }
+      setOnHandMap(map);
+    });
+  }, [filteredProducts]);
+
   const canSellProduct = (p: typeof filteredProducts[number]) => p.isAvailable !== false;
 
-  const handleAddToCart = (productId: string) => {
+  const handleAddToCart = async (productId: string) => {
     const product = filteredProducts.find((p) => p.id === productId);
-    if (product && canSellProduct(product)) {
-      addItem(product);
+    if (!product || !canSellProduct(product)) return;
+
+    if (product.trackStock && window.electronAPI?.dbCheckStockForAdd) {
+      const check = await window.electronAPI.dbCheckStockForAdd(productId, 1);
+      if (!check.allowed) {
+        await window.electronAPI.showMessageBox?.({
+          type: 'warning',
+          title: t('pos.outOfStock'),
+          message: t('pos.stockBlockMessage'),
+        });
+        return;
+      }
+      if (check.warn) {
+        const res = await window.electronAPI.showMessageBox?.({
+          type: 'question',
+          buttons: [t('common.cancel'), t('common.continue')],
+          defaultId: 1,
+          cancelId: 0,
+          title: t('pos.outOfStock'),
+          message: t('pos.stockWarnMessage', { onHand: String(check.onHand ?? 0) }),
+        });
+        if (!res || res.response !== 1) return;
+      }
     }
+
+    addItem(product);
   };
 
   return (
@@ -134,6 +179,10 @@ export function ProductCatalog() {
                       <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
                         {t('pos.outOfStockShort')}
                       </Badge>
+                    ) : product.trackStock && onHandMap[product.id] !== undefined ? (
+                      <Badge variant="outline" className="text-xs">
+                        {t('pos.stockOnHand', { qty: String(onHandMap[product.id]) })}
+                      </Badge>
                     ) : null}
                   </div>
                   <div className="flex justify-between items-center">
@@ -187,6 +236,10 @@ export function ProductCatalog() {
                         ) : !product.inStock ? (
                           <Badge variant="outline" className="text-xs border-destructive/50 text-destructive">
                             {t('pos.outOfStockShort')}
+                          </Badge>
+                        ) : product.trackStock && onHandMap[product.id] !== undefined ? (
+                          <Badge variant="outline" className="text-xs">
+                            {t('pos.stockOnHand', { qty: String(onHandMap[product.id]) })}
                           </Badge>
                         ) : null}
                       </div>

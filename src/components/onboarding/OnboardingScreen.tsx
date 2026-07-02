@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useI18n } from '../../i18n';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -6,73 +7,210 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { DEFAULT_CLOUD_SERVER_URL } from '../../config/cloudDefaults';
 import { AppVersionBadge } from '../layout/AppVersionBadge';
-
-/**
- * First-run wizard. Two gates:
- *   1. Pair the machine to the cloud (mirrors SettingsPage cloud pairing).
- *   2. Pull the initial pos_users roster so the LoginScreen has tiles.
- *
- * Renders nothing once both gates are passed; App.tsx then proceeds to the
- * LoginScreen.
- *
- * UX notes:
- *  - When the register is already paired, step 1 collapses to a compact
- *    "paired" summary with the cloud-issued machine code and a `Re-pair`
- *    button (instead of leaving disabled inputs that confuse operators).
- *  - When step 2 is the active step we auto-trigger one sync attempt on mount
- *    so the first run "just works" if a roster already exists in the cloud.
- *  - When the cloud returns an empty roster we show an explicit "create POS
- *    users in the dashboard" hint, since otherwise the wizard would silently
- *    stay stuck with hasUsers=false.
- */
+import { OnboardingWelcome } from './OnboardingWelcome';
 
 interface Props {
-  /** True when SQLite already has cloud_machine_id (paired). */
   paired: boolean;
-  /** Called after pairing succeeds so App.tsx can re-check `paired`. */
   onPaired: () => void;
-  /** True when at least one active pos_user exists locally. */
   hasUsers: boolean;
-  /** Refresh local hasUsers/paired state after onboarding actions. */
   onRefresh: () => Promise<void>;
 }
 
+type PairMode = 'qr' | 'code';
+
+type ConnectPayload = {
+  apiBaseUrl: string;
+  accessToken: string;
+  machineId: string;
+  tenantId: string;
+  merchantId: string;
+  shopId?: string;
+  machineCode: string;
+  mqttHost: string;
+  mqttPort: number;
+  mqttClientId: string;
+  mqttUsername: string;
+  mqttPassword: string;
+};
+
+type OnboardingPhase = 'welcome' | 'install';
+
 export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Props) {
   const { t } = useI18n();
-  const [apiBase, setApiBase] = useState(DEFAULT_CLOUD_SERVER_URL+'/api/v1');
+  const [phase, setPhase] = useState<OnboardingPhase>(() => (paired ? 'install' : 'welcome'));
+  const [apiBase, setApiBase] = useState(DEFAULT_CLOUD_SERVER_URL + '/api/v1');
+  const [pairMode, setPairMode] = useState<PairMode>('qr');
   const [code, setCode] = useState('');
   const [machineName, setMachineName] = useState('');
   const [busy, setBusy] = useState(false);
   const [machineCode, setMachineCode] = useState<string | null>(null);
+  const [deviceNonce, setDeviceNonce] = useState<string | null>(null);
+  const [qrPayload, setQrPayload] = useState<string | null>(null);
+  const [qrExpiresAt, setQrExpiresAt] = useState<string | null>(null);
+  const [waitingPhone, setWaitingPhone] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [, setQrExpiryTick] = useState(0);
   const [message, setMessage] = useState<{ type: 'ok' | 'err' | 'info'; text: string } | null>(
     null,
   );
+  const [settingsReady, setSettingsReady] = useState(false);
 
-  // Prefill API base + show paired machine code (when applicable). Re-runs when
-  // `paired` flips so the saved code shows up immediately after pairing succeeds.
   useEffect(() => {
-    if (!window.electronAPI?.dbGetSetting) return;
-    void window.electronAPI.dbGetSetting('cloud_api_base').then((v) => {
-      if (v) setApiBase(v);
-    });
-    void window.electronAPI.dbGetSetting('cloud_machine_code').then((v) => {
-      setMachineCode(v && String(v).trim() ? String(v) : null);
-    });
+    if (paired) setPhase('install');
   }, [paired]);
 
-  // When step 1 is done but step 2 isn't, kick off a sync once on mount so the
-  // operator doesn't have to hunt for the button on a happy-path first launch.
-  // The MQTT pull also runs in the background, but doing it here gives instant
-  // feedback ("0 users" hint) without waiting for the broker round-trip.
+  useEffect(() => {
+    if (!window.electronAPI?.dbGetSetting) {
+      setSettingsReady(true);
+      return;
+    }
+    void Promise.all([
+      window.electronAPI.dbGetSetting('cloud_api_base'),
+      window.electronAPI.dbGetSetting('cloud_machine_code'),
+    ]).then(([base, code]) => {
+      if (base) setApiBase(base);
+      setMachineCode(code && String(code).trim() ? String(code) : null);
+    }).finally(() => setSettingsReady(true));
+  }, [paired]);
+
   const autoSyncedRef = useRef(false);
   useEffect(() => {
-    if (autoSyncedRef.current) return;
+    if (!window.electronAPI?.dbGetSetting) return;
     if (!paired || hasUsers) return;
     if (!window.electronAPI?.posUsersSyncNow) return;
     autoSyncedRef.current = true;
     void runSyncUsers({ silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paired, hasUsers]);
+
+  const finishConnect = async (res: ConnectPayload) => {
+    if (!window.electronAPI?.syncConnect) return false;
+    const conn = await window.electronAPI.syncConnect({
+      apiBaseUrl: res.apiBaseUrl,
+      accessToken: res.accessToken,
+      machineId: res.machineId,
+      tenantId: res.tenantId || res.merchantId,
+      merchantId: res.merchantId || res.tenantId,
+      shopId: res.shopId,
+      machineCode: res.machineCode,
+      host: res.mqttHost,
+      port: res.mqttPort,
+      clientId: res.mqttClientId,
+      username: res.mqttUsername,
+      password: res.mqttPassword,
+    });
+    if (!conn.success) {
+      setMessage({ type: 'err', text: conn.error || t('onboarding.pairingFailed') });
+      return false;
+    }
+    setMachineCode(res.machineCode || null);
+    setMessage({ type: 'ok', text: t('onboarding.pairingOk') });
+    onPaired();
+    try {
+      await runSyncUsers({ silent: true });
+    } catch (e) {
+      console.warn('[Onboarding] pos-users sync after pairing failed:', e);
+    }
+    await onRefresh();
+    return true;
+  };
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setWaitingPhone(false);
+  };
+
+  const startQrPairing = useCallback(async () => {
+    if (!window.electronAPI?.cloudDeviceRegister || !apiBase.trim()) return;
+    stopPolling();
+    setDeviceNonce(null);
+    setQrPayload(null);
+    setQrExpiresAt(null);
+    setMessage(null);
+    const reg = await window.electronAPI.cloudDeviceRegister({
+      apiBaseUrl: apiBase.trim(),
+    });
+    if (!reg.success) {
+      setMessage({ type: 'err', text: reg.error || t('onboarding.qrRegisterFailed') });
+      return;
+    }
+    const expMs = reg.expiresAt ? new Date(reg.expiresAt).getTime() : Date.now() + 15 * 60 * 1000;
+    const payload = JSON.stringify({
+      v: 1,
+      api: reg.apiBaseUrl || apiBase.trim(),
+      nonce: reg.deviceNonce,
+      exp: Math.floor(expMs / 1000),
+    });
+    setDeviceNonce(reg.deviceNonce);
+    setQrPayload(payload);
+    setQrExpiresAt(reg.expiresAt || null);
+    setWaitingPhone(true);
+  }, [apiBase, t]);
+
+  useEffect(() => {
+    if (phase !== 'install' || paired || pairMode !== 'qr' || !apiBase.trim() || !settingsReady) {
+      stopPolling();
+      return;
+    }
+    void startQrPairing();
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, paired, pairMode, apiBase, settingsReady]);
+
+  useEffect(() => {
+    if (!qrExpiresAt || paired) return;
+    const tmr = window.setInterval(() => setQrExpiryTick((n) => n + 1), 30000);
+    return () => window.clearInterval(tmr);
+  }, [qrExpiresAt, paired]);
+
+  useEffect(() => {
+    if (!waitingPhone || !deviceNonce || paired) return;
+    if (!window.electronAPI?.cloudDevicePollStatus) return;
+
+    const tick = async () => {
+      const poll = await window.electronAPI!.cloudDevicePollStatus!({
+        apiBaseUrl: apiBase.trim(),
+        deviceNonce,
+      });
+      if (!poll.success) return;
+      if (poll.status === 'waiting') return;
+      if (poll.status === 'gone') {
+        stopPolling();
+        void startQrPairing();
+        return;
+      }
+      if (poll.status === 'credentials' && poll.accessToken && poll.machineId) {
+        stopPolling();
+        setBusy(true);
+        try {
+          await finishConnect({
+            apiBaseUrl: poll.apiBaseUrl || apiBase.trim(),
+            accessToken: poll.accessToken,
+            machineId: poll.machineId,
+            tenantId: poll.tenantId || poll.merchantId || '',
+            merchantId: poll.merchantId || poll.tenantId || '',
+            shopId: poll.shopId,
+            machineCode: poll.machineCode || '',
+            mqttHost: poll.mqttHost || 'localhost',
+            mqttPort: poll.mqttPort || 1883,
+            mqttClientId: poll.mqttClientId || '',
+            mqttUsername: poll.mqttUsername || '',
+            mqttPassword: poll.mqttPassword || '',
+          });
+        } finally {
+          setBusy(false);
+        }
+      }
+    };
+
+    pollRef.current = setInterval(() => void tick(), 2000);
+    void tick();
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingPhone, deviceNonce, paired, apiBase]);
 
   const handlePair = async () => {
     if (!window.electronAPI?.cloudPairingValidate) {
@@ -91,36 +229,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
         setMessage({ type: 'err', text: res.error || t('onboarding.pairingFailed') });
         return;
       }
-      // Persist + connect using the same path SettingsPage uses. Includes
-      // `machineCode` so it's visible in the post-pairing summary.
-      const conn = await window.electronAPI.syncConnect({
-        apiBaseUrl: res.apiBaseUrl,
-        accessToken: res.accessToken,
-        machineId: res.machineId,
-        merchantId: res.merchantId,
-        machineCode: res.machineCode,
-        host: res.mqttHost,
-        port: res.mqttPort,
-        clientId: res.mqttClientId,
-        username: res.mqttUsername,
-        password: res.mqttPassword,
-      });
-      if (!conn.success) {
-        setMessage({ type: 'err', text: conn.error || t('onboarding.pairingFailed') });
-        return;
-      }
-      setMachineCode(res.machineCode || null);
-      setMessage({ type: 'ok', text: t('onboarding.pairingOk') });
-      onPaired();
-      // Trigger an initial pos_users pull so we get the login tiles right away.
-      // We swallow errors because the auto-sync useEffect will retry as soon as
-      // `paired` flips, and the user can also click "Sync now" manually.
-      try {
-        await runSyncUsers({ silent: true });
-      } catch (e) {
-        console.warn('[Onboarding] pos-users sync after pairing failed:', e);
-      }
-      await onRefresh();
+      await finishConnect(res);
     } catch (e: unknown) {
       setMessage({ type: 'err', text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -128,11 +237,6 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
     }
   };
 
-  /**
-   * Run a pos_users pull and surface the right message based on the count.
-   * `silent: true` skips the success toast for auto-runs but still surfaces
-   * the "0 users on cloud" hint, which is the only stuck-state case.
-   */
   const runSyncUsers = async (opts: { silent?: boolean } = {}) => {
     if (!window.electronAPI?.posUsersSyncNow) return;
     setBusy(true);
@@ -145,9 +249,6 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
       }
       const count = r.users ?? 0;
       if (count === 0) {
-        // Stuck state: pairing worked but the shop has no active POS users.
-        // The wizard cannot advance until the dashboard admin creates at least
-        // one user, so show a persistent info message.
         setMessage({ type: 'info', text: t('onboarding.syncReturnedZero') });
       } else if (!opts.silent) {
         setMessage({
@@ -161,16 +262,12 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
     }
   };
 
-  /**
-   * Reset cloud pairing entirely so the operator can re-bind this register to
-   * a different shop. Confirmed via `window.confirm` because it deletes the
-   * local pos_users table.
-   */
   const handleRepair = async () => {
     if (!window.electronAPI?.cloudUnpair) return;
     if (!window.confirm(t('onboarding.repairConfirm'))) return;
     setBusy(true);
     setMessage(null);
+    stopPolling();
     try {
       const r = await window.electronAPI.cloudUnpair();
       if (!r.success) {
@@ -180,12 +277,47 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
       setMachineCode(null);
       setCode('');
       setMachineName('');
+      setDeviceNonce(null);
+      setQrPayload(null);
+      setQrExpiresAt(null);
+      setPhase('welcome');
       autoSyncedRef.current = false;
       await onRefresh();
     } finally {
       setBusy(false);
     }
   };
+
+  const handleStartInstall = () => {
+    setMessage(null);
+    setPhase('install');
+  };
+
+  const qrExpiryLabel = (() => {
+    if (!qrExpiresAt) return null;
+    const expMs = new Date(qrExpiresAt).getTime();
+    if (!Number.isFinite(expMs)) return null;
+    const remainingMs = expMs - Date.now();
+    if (remainingMs <= 0) return t('onboarding.qrExpired');
+    const minutes = Math.max(1, Math.ceil(remainingMs / 60000));
+    return t('onboarding.qrExpiresIn', { minutes: String(minutes) });
+  })();
+
+  if (!paired && phase === 'welcome') {
+    return (
+      <div className="h-screen w-screen bg-muted flex items-center justify-center p-4 till:p-4 xl:p-6 relative">
+        <AppVersionBadge className="absolute top-3 end-4 till:top-3 till:end-4" />
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-8 pb-8">
+            <OnboardingWelcome
+              onStart={handleStartInstall}
+              busy={busy || !settingsReady}
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen bg-muted flex items-center justify-center p-4 till:p-4 xl:p-6 relative">
@@ -196,7 +328,6 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
           <p className="text-muted-foreground text-sm mt-1">{t('onboarding.subtitle')}</p>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Step 1: pair (or paired summary) */}
           <div>
             <h2 className="font-semibold mb-2">
               1. {t('onboarding.step1Title')}{' '}
@@ -219,17 +350,35 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
                     </div>
                   )}
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRepair}
-                  disabled={busy}
-                >
+                <Button variant="outline" size="sm" onClick={handleRepair} disabled={busy}>
                   {busy ? t('onboarding.repairing') : t('onboarding.repairBtn')}
                 </Button>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={pairMode === 'qr' ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setPairMode('qr')}
+                  >
+                    {t('onboarding.pairModeQr')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={pairMode === 'code' ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => {
+                      stopPolling();
+                      setPairMode('code');
+                    }}
+                  >
+                    {t('onboarding.pairModeCode')}
+                  </Button>
+                </div>
                 <div>
                   <Label>{t('onboarding.apiBase')}</Label>
                   <Input
@@ -239,36 +388,70 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
                     disabled={busy}
                   />
                 </div>
-                <div>
-                  <Label>{t('onboarding.pairingCode')}</Label>
-                  <Input
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="ABC123"
-                    disabled={busy}
-                  />
-                </div>
-                <div>
-                  <Label>{t('onboarding.machineName')}</Label>
-                  <Input
-                    value={machineName}
-                    onChange={(e) => setMachineName(e.target.value)}
-                    placeholder={t('onboarding.machineNamePlaceholder')}
-                    disabled={busy}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  onClick={handlePair}
-                  disabled={busy || !apiBase.trim() || !code.trim()}
-                >
-                  {busy ? t('common.loading') : t('onboarding.pairBtn')}
-                </Button>
+                {pairMode === 'code' ? (
+                  <div>
+                    <Label>{t('onboarding.machineName')}</Label>
+                    <Input
+                      value={machineName}
+                      onChange={(e) => setMachineName(e.target.value)}
+                      placeholder={t('onboarding.machineNamePlaceholder')}
+                      disabled={busy}
+                    />
+                  </div>
+                ) : null}
+                {pairMode === 'qr' ? (
+                  <div className="space-y-3 text-center">
+                    <p className="text-sm text-muted-foreground">{t('onboarding.qrHint')}</p>
+                    {qrPayload ? (
+                      <div className="flex justify-center">
+                        <QRCodeSVG value={qrPayload} size={200} level="M" />
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+                    )}
+                    {waitingPhone ? (
+                      <p className="text-sm text-primary animate-pulse">{t('onboarding.qrWaiting')}</p>
+                    ) : null}
+                    {qrExpiryLabel ? (
+                      <p
+                        className={
+                          'text-sm ' +
+                          (qrExpiryLabel === t('onboarding.qrExpired')
+                            ? 'text-destructive font-medium'
+                            : 'text-muted-foreground')
+                        }
+                      >
+                        {qrExpiryLabel}
+                      </p>
+                    ) : null}
+                    <Button variant="outline" size="sm" onClick={() => void startQrPairing()} disabled={busy}>
+                      {t('onboarding.qrRefresh')}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div>
+                      <Label>{t('onboarding.pairingCode')}</Label>
+                      <Input
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        placeholder="ABC123"
+                        disabled={busy}
+                      />
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={handlePair}
+                      disabled={busy || !apiBase.trim() || !code.trim()}
+                    >
+                      {busy ? t('common.loading') : t('onboarding.pairBtn')}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* Step 2: sync users */}
           <div>
             <h2 className="font-semibold mb-2">
               2. {t('onboarding.step2Title')}{' '}

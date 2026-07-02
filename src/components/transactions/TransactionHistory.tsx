@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
-import { Calendar, Receipt, Search, Filter, ChevronLeft, ChevronRight, DollarSign, RotateCcw } from 'lucide-react';
+import { Calendar, Receipt, Search, Filter, ChevronLeft, ChevronRight, DollarSign, RotateCcw, Printer, Ticket } from 'lucide-react';
 import { useTransactionStore } from '@/stores/useTransactionStore';
+import { useProductStore } from '@/stores/useProductStore';
+import { useBusinessStore } from '@/stores/useBusinessStore';
+import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useI18n } from '@/i18n';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { buildReceiptPrintPayload } from '@/utils/receiptPrint';
+import { printReceiptForTransaction } from '@/utils/printReceipt';
+import { reprintVoucher } from '@/utils/voucherIssue';
+import { formatShortSerial } from '@/utils/voucherTemplate';
 import { RefundDialog } from './RefundDialog';
-import type { Transaction } from '@/types/index';
+import type { IssuedVoucher, Transaction, Voucher } from '@/types/index';
 
 export function TransactionHistory() {
   const { t } = useI18n();
@@ -26,9 +33,13 @@ export function TransactionHistory() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   
   const { getTransactionsByDateRange, getTodaysTransactions } = useTransactionStore();
+  const { categories } = useProductStore();
+  const { businessInfo } = useBusinessStore();
+  const { globalTaxRate, language } = useSettingsStore();
   const pageSize = 50;
   const prevSearchQueryRef = useRef(searchQuery);
   const [refundDialogTransaction, setRefundDialogTransaction] = useState<Transaction | null>(null);
+  const [printMessage, setPrintMessage] = useState<string | null>(null);
 
   // Reset to page 1 when search query changes
   useEffect(() => {
@@ -114,10 +125,71 @@ export function TransactionHistory() {
     }
   };
 
+  const handleReprintReceipt = async (
+    transaction: Transaction,
+    options?: { originalDocNumber?: string },
+  ) => {
+    if (!window.electronAPI?.printReceipt || !businessInfo) return;
+    try {
+      const payload = buildReceiptPrintPayload(
+        transaction,
+        businessInfo,
+        globalTaxRate,
+        language,
+        categories,
+        {
+          isCopy: !transaction.refundOfTransactionId,
+          originalDocNumber: options?.originalDocNumber,
+        },
+      );
+      const { receiptError, drawerWarning } = await printReceiptForTransaction(payload, transaction, t);
+      if (receiptError) {
+        setPrintMessage(receiptError);
+      } else if (drawerWarning) {
+        setPrintMessage(drawerWarning);
+      } else {
+        setPrintMessage(null);
+      }
+    } catch (e: unknown) {
+      setPrintMessage(e instanceof Error ? e.message : t('receipt.printFailed'));
+    }
+  };
+
+  const canShowRefundButton = (transaction: Transaction) => {
+    if (transaction.refundOfTransactionId) return false;
+    return transaction.status === 'completed' || transaction.status === 'partial_refund';
+  };
+
+  const handleReprintRefundReceipt = async (refundTx: Transaction) => {
+    if (!refundTx.refundOfTransactionId) return;
+    const originalTx = transactions.find((t) => t.id === refundTx.refundOfTransactionId);
+    await handleReprintReceipt(refundTx, {
+      originalDocNumber: originalTx?.transactionNumber,
+    });
+  };
+
+  const handleReprintVoucher = async (transaction: Transaction, issued: IssuedVoucher) => {
+    if (!businessInfo || !issued.voucherId || !window.electronAPI?.dbGetVoucher) return;
+    try {
+      const voucher = (await window.electronAPI.dbGetVoucher(issued.voucherId)) as Voucher | null;
+      if (!voucher) {
+        setPrintMessage(t('voucher.reprintFailed'));
+        return;
+      }
+      const err = await reprintVoucher(issued, voucher, businessInfo, transaction.transactionNumber);
+      setPrintMessage(err);
+    } catch (e: unknown) {
+      setPrintMessage(e instanceof Error ? e.message : t('voucher.reprintFailed'));
+    }
+  };
+
 
   return (
     <div className="p-6 h-full overflow-auto">
       <div className="mb-6">
+        {printMessage ? (
+          <p className="text-sm text-destructive mb-2">{printMessage}</p>
+        ) : null}
         <h1 className="text-2xl font-bold mb-2">{t('transactions.history')}</h1>
         <p className="text-muted-foreground">{t('transactions.description')}</p>
       </div>
@@ -310,17 +382,56 @@ export function TransactionHistory() {
                         {t('transactions.tendered')}: {formatCurrency(transaction.amountTendered)}
                       </p>
                     )}
-                    {transaction.status === 'completed' && !transaction.refundOfTransactionId && (
+                    {transaction.refundOfTransactionId ? (
                       <Button
                         variant="outline"
                         size="sm"
                         className="gap-2"
-                        onClick={() => setRefundDialogTransaction(transaction)}
+                        onClick={() => void handleReprintRefundReceipt(transaction)}
                       >
-                        <RotateCcw className="h-4 w-4" />
-                        {t('transactions.refund')}
+                        <Printer className="h-4 w-4" />
+                        {t('transactions.reprintRefundReceipt')}
                       </Button>
-                    )}
+                    ) : null}
+                    {canShowRefundButton(transaction) ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => void handleReprintReceipt(transaction)}
+                        >
+                          <Printer className="h-4 w-4" />
+                          {t('transactions.reprintReceipt')}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setRefundDialogTransaction(transaction)}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          {t('transactions.refund')}
+                        </Button>
+                      </>
+                    ) : null}
+                    {transaction.issuedVouchers && transaction.issuedVouchers.length > 0 ? (
+                      <div className="w-full mt-2 space-y-1">
+                        <p className="text-xs text-muted-foreground">{t('transactions.vouchersIssued')}</p>
+                        {transaction.issuedVouchers.map((iv) => (
+                          <Button
+                            key={iv.id}
+                            variant="ghost"
+                            size="sm"
+                            className="gap-2 h-8 text-xs w-full justify-start"
+                            onClick={() => void handleReprintVoucher(transaction, iv)}
+                          >
+                            <Ticket className="h-3.5 w-3.5" />
+                            {iv.productName} × {iv.quantity} — {formatShortSerial(iv.id)}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </CardContent>

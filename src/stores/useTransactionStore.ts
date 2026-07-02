@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import type { Transaction, Cart, CartItem, Customer, User } from '../types/index';
+import {
+  encodeRefundSourceItemNote,
+  extractNayaxOriginalTransactionId,
+  getRemainingQtyByOriginalItem,
+  hasRemainingRefundable,
+  hydrateTransactionFromDb,
+} from '../utils/refundHelpers';
 import { generateUUID } from '../utils/uuid';
 import { useTradingDayStore } from './useTradingDayStore';
 import { useSettingsStore } from './useSettingsStore';
@@ -12,9 +19,22 @@ import { useSettingsStore } from './useSettingsStore';
 //   getTransactionsPage 
 // } from '../database/database';
 
+type TipExtras = { tipAmount?: number; tipPaymentMethod?: 'cash' | 'card' };
+
 export type PaymentDetails =
-  | { mode: 'cash'; amountTendered: number; changeAmount: number }
-  | { mode: 'card'; nayaxMeta: string };
+  | ({ mode: 'cash'; amountTendered: number; changeAmount: number } & TipExtras)
+  | ({ mode: 'card'; nayaxMeta: string } & TipExtras);
+
+function applyTipFields(tx: Transaction, tip?: TipExtras): Transaction {
+  const amt = tip?.tipAmount;
+  if (amt == null || amt <= 0) return tx;
+  return {
+    ...tx,
+    tipAmount: amt,
+    tipPaymentMethod:
+      tip?.tipPaymentMethod ?? (tx.paymentMethod === 'card' ? 'card' : 'cash'),
+  };
+}
 
 function serializeTransactionForDb(transaction: Transaction) {
   return {
@@ -85,12 +105,17 @@ interface TransactionStore {
   generateTransactionNumber: () => string;
   loadTodaysTransactions: () => Promise<void>;
   deleteAllTransactions: () => Promise<{ success: boolean; deleted?: number; error?: string }>;
+  loadRefundsForOriginal: (originalTransactionId: string) => Promise<Transaction[]>;
   createRefundTransaction: (
     originalTransaction: Transaction,
     options: { fullRefund: boolean; partialItems?: { itemId: string; quantity: number }[]; amountReturned?: number }
   ) => Promise<Transaction>;
   updateTransactionStatus: (transactionId: string, status: Transaction['status']) => Promise<void>;
-  createPendingCardTransaction: (cart: Cart, customer?: Customer) => Promise<Transaction>;
+  createPendingCardTransaction: (
+    cart: Cart,
+    customer?: Customer,
+    tip?: TipExtras,
+  ) => Promise<Transaction>;
   completePendingCardTransaction: (transactionId: string, nayaxMeta: string) => Promise<Transaction>;
   cancelPendingTransaction: (transactionId: string) => Promise<void>;
 }
@@ -121,24 +146,27 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     // 320 = חשבונית מס/קבלה (tax invoice/receipt): POS sales always have items + payment
     const documentType = 320;
 
-    const transaction: Transaction = {
-      id: generateUUID(),
-      transactionNumber: generateTransactionNumber(),
-      cart,
-      customer,
-      status: 'completed',
-      cashier: currentUser,
-      createdAt: now,
-      updatedAt: now,
-      // Tax Authority fields
-      documentType,
-      documentProductionDate: now, // System-determined
-      documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
-      paymentMethod: paymentDetails.mode === 'card' ? 'card' : 'cash',
-      nayaxMeta: paymentDetails.mode === 'card' ? paymentDetails.nayaxMeta : undefined,
-      amountTendered: paymentDetails.mode === 'cash' ? paymentDetails.amountTendered : undefined,
-      changeAmount: paymentDetails.mode === 'cash' ? paymentDetails.changeAmount : undefined,
-    };
+    const transaction = applyTipFields(
+      {
+        id: generateUUID(),
+        transactionNumber: generateTransactionNumber(),
+        cart,
+        customer,
+        status: 'completed',
+        cashier: currentUser,
+        createdAt: now,
+        updatedAt: now,
+        // Tax Authority fields
+        documentType,
+        documentProductionDate: now, // System-determined
+        documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
+        paymentMethod: paymentDetails.mode === 'card' ? 'card' : 'cash',
+        nayaxMeta: paymentDetails.mode === 'card' ? paymentDetails.nayaxMeta : undefined,
+        amountTendered: paymentDetails.mode === 'cash' ? paymentDetails.amountTendered : undefined,
+        changeAmount: paymentDetails.mode === 'cash' ? paymentDetails.changeAmount : undefined,
+      },
+      paymentDetails,
+    );
 
     // Save to database via IPC
     try {
@@ -164,7 +192,11 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     return transaction;
   },
 
-  createPendingCardTransaction: async (cart: Cart, customer?: Customer): Promise<Transaction> => {
+  createPendingCardTransaction: async (
+    cart: Cart,
+    customer?: Customer,
+    tip?: TipExtras,
+  ): Promise<Transaction> => {
     const { currentUser, generateTransactionNumber } = get();
 
     if (!currentUser) {
@@ -180,20 +212,23 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     const documentType = 320;
     const cartForSave = cloneCartWithFreshLineItemIds(cart);
 
-    const transaction: Transaction = {
-      id: generateUUID(),
-      transactionNumber: generateTransactionNumber(),
-      cart: cartForSave,
-      customer,
-      status: 'pending',
-      cashier: currentUser,
-      createdAt: now,
-      updatedAt: now,
-      documentType,
-      documentProductionDate: now,
-      documentDiscount: cartForSave.discountAmount > 0 ? cartForSave.discountAmount : undefined,
-      paymentMethod: 'card',
-    };
+    const transaction = applyTipFields(
+      {
+        id: generateUUID(),
+        transactionNumber: generateTransactionNumber(),
+        cart: cartForSave,
+        customer,
+        status: 'pending',
+        cashier: currentUser,
+        createdAt: now,
+        updatedAt: now,
+        documentType,
+        documentProductionDate: now,
+        documentDiscount: cartForSave.discountAmount > 0 ? cartForSave.discountAmount : undefined,
+        paymentMethod: 'card',
+      },
+      tip,
+    );
 
     if (!window.electronAPI) {
       throw new Error('Database not available');
@@ -334,6 +369,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           refundOfTransactionId: tx.refundOfTransactionId,
           paymentMethod: tx.paymentMethod,
           nayaxMeta: tx.nayaxMeta,
+          tipAmount: tx.tipAmount,
+          tipPaymentMethod: tx.tipPaymentMethod,
         }));
       } else {
         // Fallback to in-memory
@@ -436,6 +473,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           refundOfTransactionId: tx.refundOfTransactionId,
           paymentMethod: tx.paymentMethod,
           nayaxMeta: tx.nayaxMeta,
+          tipAmount: tx.tipAmount,
+          tipPaymentMethod: tx.tipPaymentMethod,
         }));
         
         return { transactions, total: result.total };
@@ -519,6 +558,8 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
           refundOfTransactionId: tx.refundOfTransactionId,
           paymentMethod: tx.paymentMethod,
           nayaxMeta: tx.nayaxMeta,
+          tipAmount: tx.tipAmount,
+          tipPaymentMethod: tx.tipPaymentMethod,
         }));
         set({ transactions });
       } else {
@@ -528,6 +569,12 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       console.error('Failed to load today\'s transactions:', error);
       set({ transactions: [] });
     }
+  },
+
+  loadRefundsForOriginal: async (originalTransactionId: string): Promise<Transaction[]> => {
+    if (!window.electronAPI?.dbGetRefundsForOriginal) return [];
+    const rows = await window.electronAPI.dbGetRefundsForOriginal(originalTransactionId);
+    return rows.map((row) => hydrateTransactionFromDb(row));
   },
 
   createRefundTransaction: async (
@@ -550,21 +597,45 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       throw new Error('refund.cross-day-not-supported');
     }
 
+    if (!isSameDay) {
+      throw new Error('refund.cross-day-not-supported');
+    }
+
+    const priorRefunds = await get().loadRefundsForOriginal(originalTransaction.id);
+    const remaining = getRemainingQtyByOriginalItem(originalTransaction, priorRefunds);
+    if (!hasRemainingRefundable(originalTransaction, priorRefunds)) {
+      throw new Error('refund.nothing-remaining');
+    }
+
     let items: CartItem[];
     if (options.fullRefund) {
-      items = originalTransaction.cart.items.map((item) => ({
-        ...item,
-        id: generateUUID(),
-        quantity: item.quantity,
-        totalPrice: item.totalPrice,
-      }));
+      items = originalTransaction.cart.items
+        .map((item) => {
+          const qty = remaining[item.id] ?? 0;
+          if (qty <= 0) return null;
+          const ratio = item.quantity > 0 ? qty / item.quantity : 0;
+          const totalPrice = item.unitPrice * qty - (item.lineDiscount || 0) * ratio;
+          return {
+            ...item,
+            id: generateUUID(),
+            quantity: qty,
+            totalPrice,
+            lineDiscount: item.lineDiscount ? (item.lineDiscount * qty) / item.quantity : undefined,
+            notes: encodeRefundSourceItemNote(item.id),
+          };
+        })
+        .filter(Boolean) as CartItem[];
     } else if (options.partialItems?.length) {
       items = options.partialItems
         .map(({ itemId, quantity }) => {
           const originalItem = originalTransaction.cart.items.find((i) => i.id === itemId);
           if (!originalItem || quantity <= 0) return null;
-          const qty = Math.min(quantity, originalItem.quantity);
-          const totalPrice = originalItem.unitPrice * qty - (originalItem.lineDiscount || 0) * (qty / originalItem.quantity);
+          const maxQty = remaining[originalItem.id] ?? 0;
+          const qty = Math.min(quantity, maxQty);
+          if (qty <= 0) return null;
+          const totalPrice =
+            originalItem.unitPrice * qty -
+            (originalItem.lineDiscount || 0) * (qty / originalItem.quantity);
           return {
             id: generateUUID(),
             productId: originalItem.productId,
@@ -574,14 +645,20 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
             totalPrice,
             discount: originalItem.discount,
             discountType: originalItem.discountType,
-            notes: originalItem.notes,
+            notes: encodeRefundSourceItemNote(originalItem.id),
             transactionType: originalItem.transactionType,
-            lineDiscount: originalItem.lineDiscount ? (originalItem.lineDiscount * qty) / originalItem.quantity : undefined,
+            lineDiscount: originalItem.lineDiscount
+              ? (originalItem.lineDiscount * qty) / originalItem.quantity
+              : undefined,
           } as CartItem;
         })
         .filter(Boolean) as CartItem[];
     } else {
       throw new Error('Partial refund requires partialItems');
+    }
+
+    if (items.length === 0) {
+      throw new Error('refund.nothing-remaining');
     }
 
     const taxRate = (useSettingsStore.getState().globalTaxRate ?? 0.18) as number;
@@ -605,8 +682,39 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
     };
 
     const amountReturned = options.amountReturned ?? cart.totalAmount;
+    const refundId = generateUUID();
+    const isCardRefund = originalTransaction.paymentMethod === 'card';
+    let refundNayaxMeta: string | undefined;
+
+    if (isCardRefund) {
+      const originalTxnId = extractNayaxOriginalTransactionId(originalTransaction.nayaxMeta);
+      if (!originalTxnId) {
+        throw new Error('refund.card-missing-original-txn');
+      }
+      if (!window.electronAPI?.nayaxDoRefund) {
+        throw new Error('refund.card-not-configured');
+      }
+      const amountAgorot = Math.round(amountReturned * 100);
+      const res = await window.electronAPI.nayaxDoRefund({
+        amountAgorot,
+        vuid: refundId,
+        originalTransactionId: originalTxnId,
+      });
+      if (!res.approved) {
+        throw new Error(res.error || res.statusMessage || 'refund.card-declined');
+      }
+      refundNayaxMeta = JSON.stringify({
+        vuid: res.vuid,
+        result: res.result,
+        outcome: res.outcome,
+        statusCode: res.statusCode,
+        refundOfTransactionId: originalTransaction.id,
+        originalNayaxTransactionId: originalTxnId,
+      });
+    }
+
     const refundTransaction: Transaction = {
-      id: generateUUID(),
+      id: refundId,
       transactionNumber: generateTransactionNumber(),
       cart,
       customer: originalTransaction.customer,
@@ -618,10 +726,11 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       documentProductionDate: now,
       branchId: originalTransaction.branchId,
       documentDiscount: cart.discountAmount > 0 ? cart.discountAmount : undefined,
-      paymentMethod: 'cash',
+      paymentMethod: isCardRefund ? 'card' : 'cash',
       amountTendered: amountReturned,
       changeAmount: 0,
       refundOfTransactionId: originalTransaction.id,
+      nayaxMeta: refundNayaxMeta,
     };
 
     if (window.electronAPI) {
@@ -658,16 +767,37 @@ export const useTransactionStore = create<TransactionStore>((set, get) => ({
       });
       await window.electronAPI.dbUpdateTransactionStatus(
         originalTransaction.id,
-        options.fullRefund ? 'refunded' : 'partial_refund'
+        hasRemainingRefundable(originalTransaction, [
+          ...priorRefunds,
+          refundTransaction,
+        ])
+          ? 'partial_refund'
+          : 'refunded',
       );
     }
+
+    const newOriginalStatus = hasRemainingRefundable(originalTransaction, [
+      ...priorRefunds,
+      refundTransaction,
+    ])
+      ? 'partial_refund'
+      : 'refunded';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const txDate = new Date(refundTransaction.createdAt);
     txDate.setHours(0, 0, 0, 0);
     if (txDate.getTime() === today.getTime()) {
-      set((state) => ({ transactions: [refundTransaction, ...state.transactions] }));
+      set((state) => ({
+        transactions: [
+          refundTransaction,
+          ...state.transactions.map((t) =>
+            t.id === originalTransaction.id
+              ? { ...t, status: newOriginalStatus, updatedAt: new Date() }
+              : t,
+          ),
+        ],
+      }));
     }
     return refundTransaction;
   },

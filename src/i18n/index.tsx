@@ -64,6 +64,7 @@ export function I18nProvider({ children, defaultLanguage = 'he' }: I18nProviderP
     if (params) {
       for (const [paramKey, paramValue] of Object.entries(params)) {
         result = result.replace(new RegExp(`\\{\\{${paramKey}\\}\\}`, 'g'), paramValue);
+        result = result.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), paramValue);
       }
     }
     return result;

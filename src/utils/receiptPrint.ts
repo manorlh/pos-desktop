@@ -10,6 +10,8 @@ function serializeTransaction(tx: Transaction): SerializedReceiptTransaction {
     paymentMethod: tx.paymentMethod,
     amountTendered: tx.amountTendered,
     changeAmount: tx.changeAmount,
+    tipAmount: tx.tipAmount,
+    tipPaymentMethod: tx.tipPaymentMethod,
     cashier: { name: tx.cashier.name },
     cart: {
       subtotal: tx.cart.subtotal,
@@ -35,11 +37,14 @@ export function buildReceiptPrintPayload(
   globalTaxRate: number,
   language: 'he' | 'en',
   categories: Category[],
+  options?: { isCopy?: boolean; originalDocNumber?: string },
 ): ReceiptPrintPayload {
   const categoryNames: Record<string, string> = {};
   for (const c of categories) {
     categoryNames[c.id] = c.name;
   }
+
+  const isRefund = Boolean(tx.refundOfTransactionId) || tx.documentType === 330;
 
   return {
     transaction: serializeTransaction(tx),
@@ -56,5 +61,8 @@ export function buildReceiptPrintPayload(
     language,
     categoryNames,
     printedAt: new Date().toISOString(),
+    isCopy: options?.isCopy ?? false,
+    isRefund,
+    originalDocNumber: options?.originalDocNumber,
   };
 }

@@ -13,12 +13,29 @@ interface PrintResult {
   error?: string;
 }
 
+interface OpenCashDrawerPayload {
+  printerName?: string;
+  cashierName: string;
+  language?: 'he' | 'en';
+}
+
 interface ReceiptPrintPayload {
   transaction: unknown;
   businessInfo: unknown;
   globalTaxRate: number;
   language?: 'he' | 'en';
   categoryNames?: Record<string, string>;
+  printedAt?: string;
+  isCopy?: boolean;
+  /** OS printer device name; omit for system default. */
+  printerName?: string;
+}
+
+interface VoucherPrintPayload {
+  issued: unknown;
+  voucher: unknown;
+  businessInfo: unknown;
+  isCopy?: boolean;
   printedAt?: string;
 }
 
@@ -73,6 +90,8 @@ type NayaxDoTransactionResult =
       statusMessage?: string;
     };
 
+type NayaxDoRefundResult = NayaxDoTransactionResult;
+
 /** Abort is optimistic: IPC returns immediately; JSON-RPC runs in the main-process background. */
 type NayaxAbortTransactionResult =
   | { ok: true; dispatched: true }
@@ -90,6 +109,7 @@ interface IntegrationLogRow {
 
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
+  appRestart: () => Promise<{ success: boolean }>;
   getHeeboFontCss: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
   
@@ -97,6 +117,8 @@ interface ElectronAPI {
   getPrinters: () => Promise<Printer[]>;
   printTest: (printerName: string) => Promise<PrintResult>;
   printReceipt: (payload: ReceiptPrintPayload) => Promise<PrintResult>;
+  printVoucher: (payload: VoucherPrintPayload) => Promise<PrintResult>;
+  openCashDrawer: (payload: OpenCashDrawerPayload) => Promise<PrintResult>;
   showPrintPreview: (printerName: string) => Promise<PrintResult>;
   
   // Tax Report functions
@@ -116,6 +138,16 @@ interface ElectronAPI {
   
   // Database operations
   dbGetProducts: () => Promise<any[]>;
+  dbGetVoucher: (voucherId: string) => Promise<any | null>;
+  dbCheckStockForAdd: (
+    productId: string,
+    quantity: number,
+  ) => Promise<{ success: boolean; allowed: boolean; warn?: boolean; onHand?: number | null; error?: string }>;
+  dbGetEffectiveOnHand: (
+    productId: string,
+  ) => Promise<{ success: boolean; onHand: number | null; error?: string }>;
+  dbSaveIssuedVouchers: (transactionId: string, issued: any[]) => Promise<{ success: boolean; error?: string }>;
+  incrementIssuedVoucherReprint: (issuedId: string) => Promise<any | null>;
   dbSaveProduct: (product: any) => Promise<{ success: boolean; error?: string }>;
   dbGetCategories: () => Promise<any[]>;
   dbSaveCategory: (category: any) => Promise<{ success: boolean; error?: string }>;
@@ -124,6 +156,7 @@ interface ElectronAPI {
   dbGetTodaysTransactions: () => Promise<any[]>;
   dbGetTransactionsByDateRange: (startDate: string, endDate: string) => Promise<any[]>;
   dbGetTransactionsPage: (options: { startDate?: string; endDate?: string; limit?: number; offset?: number; status?: string }) => Promise<{ transactions: any[]; total: number }>;
+  dbGetRefundsForOriginal: (originalTransactionId: string) => Promise<any[]>;
   dbDeleteAllTransactions: () => Promise<{ success: boolean; deleted?: number; error?: string }>;
   dbSaveTransaction: (transaction: any) => Promise<{ success: boolean; error?: string }>;
   dbUpdateTransactionStatus: (transactionId: string, status: string) => Promise<{ success: boolean; error?: string }>;
@@ -136,6 +169,11 @@ interface ElectronAPI {
 
   nayaxTestConnection: () => Promise<NayaxTestConnectionResult>;
   nayaxDoTransaction: (payload: { amountAgorot: number; vuid: string }) => Promise<NayaxDoTransactionResult>;
+  nayaxDoRefund: (payload: {
+    amountAgorot: number;
+    vuid: string;
+    originalTransactionId: string;
+  }) => Promise<NayaxDoRefundResult>;
   nayaxAbortTransaction: (payload: { vuid: string }) => Promise<NayaxAbortTransactionResult>;
 
   dbGetIntegrationLogs: (options: {
@@ -160,6 +198,8 @@ interface ElectronAPI {
     callback: (info: { syncType: string; products: number; categories: number }) => void,
   ) => () => void;
   onCatalogImagesUpdated: (callback: () => void) => () => void;
+  onDatabaseResumed: (callback: () => void) => () => void;
+  onDatabaseResumeFailed: (callback: () => void) => () => void;
 
   cloudPairingValidate: (payload: {
     apiBaseUrl: string;
@@ -182,11 +222,42 @@ interface ElectronAPI {
       }
     | { success: false; error: string; statusCode?: number }
   >;
+  cloudDeviceRegister: (payload: {
+    apiBaseUrl: string;
+    machineName?: string;
+  }) => Promise<
+    | { success: true; deviceNonce: string; expiresAt: string; apiBaseUrl: string }
+    | { success: false; error: string; statusCode?: number }
+  >;
+  cloudDevicePollStatus: (payload: {
+    apiBaseUrl: string;
+    deviceNonce: string;
+  }) => Promise<
+    | {
+        success: true;
+        status: 'waiting' | 'credentials' | 'gone';
+        apiBaseUrl?: string;
+        machineId?: string;
+        merchantId?: string;
+        shopId?: string;
+        accessToken?: string;
+        mqttClientId?: string;
+        mqttUsername?: string;
+        mqttPassword?: string;
+        machineCode?: string;
+        mqttHost?: string;
+        mqttPort?: number;
+        error?: string;
+      }
+    | { success: false; error: string; statusCode?: number }
+  >;
   syncConnect: (config: {
     apiBaseUrl: string;
     accessToken: string;
     machineId: string;
+    tenantId?: string;
     merchantId?: string;
+    shopId?: string;
     machineCode?: string;
     host: string;
     port: number;
@@ -208,7 +279,7 @@ interface ElectronAPI {
     categories?: number;
   }>;
   syncRefreshMachineContext: () => Promise<
-    { success: true; merchantId: string | null; shopId: string | null } | { success: false; error?: string }
+    { success: true; tenantId: string | null; merchantId: string | null; shopId: string | null } | { success: false; error?: string }
   >;
   syncEnqueue: (data: unknown) => Promise<{ success: boolean; error?: string }>;
   syncFlushQueue: () => Promise<{ success: boolean; error?: string }>;
@@ -231,9 +302,19 @@ interface ElectronAPI {
   cloudSyncFlush: () => Promise<{ success: boolean; flushed?: number; error?: string }>;
   cloudSyncOnlineHint: () => Promise<{ success: boolean; error?: string }>;
   cloudZClose: (zPayload: Record<string, unknown>) => Promise<
-    | { success: true; status: 'accepted' | 'duplicate' }
+    | { success: true; status: 'accepted' | 'duplicate'; zReportId?: string }
     | { success: false; error: string; missingIds?: string[]; httpStatus?: number }
   >;
+  cloudCloseDayAck: (payload: {
+    requestId: string;
+    phase: 'received' | 'completed' | 'failed';
+    zReportId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  onCloseDayRequested: (
+    callback: (payload: { requestId?: string; initiatedBy?: string; message?: string }) => void,
+  ) => () => void;
   cloudPurgeClosedDay: (
     tradingDayId: string,
   ) => Promise<{ success: boolean; deleted?: number; error?: string }>;
@@ -272,6 +353,9 @@ interface ElectronAPI {
   >;
   posUsersHasAny: () => Promise<{ success: boolean; hasAny: boolean; error?: string }>;
   onPosUsersUpdated: (callback: (info: { count: number }) => void) => () => void;
+
+  settingsSyncNow: () => Promise<{ ok: boolean; error?: string }>;
+  onSettingsUpdated: (callback: () => void) => () => void;
 }
 
 declare global {

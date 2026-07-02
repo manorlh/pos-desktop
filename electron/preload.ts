@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  appRestart: () => ipcRenderer.invoke('app-restart'),
   getHeeboFontCss: () => ipcRenderer.invoke('get-heebo-font-css'),
   showMessageBox: (options: any) => ipcRenderer.invoke('show-message-box', options),
   
@@ -29,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPrinters: () => ipcRenderer.invoke('get-printers'),
   printTest: (printerName: string) => ipcRenderer.invoke('print-test', printerName),
   printReceipt: (payload: unknown) => ipcRenderer.invoke('print-receipt', payload),
+  printVoucher: (payload: unknown) => ipcRenderer.invoke('print-voucher', payload),
+  openCashDrawer: (payload: { printerName?: string; cashierName: string; language?: 'he' | 'en' }) =>
+    ipcRenderer.invoke('open-cash-drawer', payload),
   showPrintPreview: (printerName: string) => ipcRenderer.invoke('show-print-preview', printerName),
   
   // Tax Report functions
@@ -49,6 +53,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Database operations
   dbGetProducts: () => ipcRenderer.invoke('db-get-products'),
+  dbGetVoucher: (voucherId: string) => ipcRenderer.invoke('db-get-voucher', voucherId),
+  dbCheckStockForAdd: (productId: string, quantity: number) =>
+    ipcRenderer.invoke('db-check-stock-for-add', productId, quantity),
+  dbGetEffectiveOnHand: (productId: string) =>
+    ipcRenderer.invoke('db-get-effective-on-hand', productId),
+  dbSaveIssuedVouchers: (transactionId: string, issued: unknown[]) =>
+    ipcRenderer.invoke('db-save-issued-vouchers', transactionId, issued),
+  incrementIssuedVoucherReprint: (issuedId: string) =>
+    ipcRenderer.invoke('increment-issued-voucher-reprint', issuedId),
   dbSaveProduct: (product: any) => ipcRenderer.invoke('db-save-product', product),
   dbGetCategories: () => ipcRenderer.invoke('db-get-categories'),
   dbSaveCategory: (category: any) => ipcRenderer.invoke('db-save-category', category),
@@ -57,6 +70,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dbGetTodaysTransactions: () => ipcRenderer.invoke('db-get-todays-transactions'),
   dbGetTransactionsByDateRange: (startDate: string, endDate: string) => ipcRenderer.invoke('db-get-transactions-by-date-range', startDate, endDate),
   dbGetTransactionsPage: (options: any) => ipcRenderer.invoke('db-get-transactions-page', options),
+  dbGetRefundsForOriginal: (originalTransactionId: string) =>
+    ipcRenderer.invoke('db-get-refunds-for-original', originalTransactionId),
   dbDeleteAllTransactions: () => ipcRenderer.invoke('db-delete-all-transactions'),
   dbSaveTransaction: (transaction: any) => ipcRenderer.invoke('db-save-transaction', transaction),
   dbUpdateTransactionStatus: (transactionId: string, status: string) => ipcRenderer.invoke('db-update-transaction-status', transactionId, status),
@@ -70,6 +85,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   nayaxTestConnection: () => ipcRenderer.invoke('nayax-test-connection'),
   nayaxDoTransaction: (payload: { amountAgorot: number; vuid: string }) =>
     ipcRenderer.invoke('nayax-do-transaction', payload),
+  nayaxDoRefund: (payload: { amountAgorot: number; vuid: string; originalTransactionId: string }) =>
+    ipcRenderer.invoke('nayax-do-refund', payload),
   nayaxAbortTransaction: (payload: { vuid: string }) =>
     ipcRenderer.invoke('nayax-abort-transaction', payload),
 
@@ -105,10 +122,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('catalog-images-updated', handler);
     return () => ipcRenderer.off('catalog-images-updated', handler);
   },
+  onDatabaseResumed: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('database-resumed', handler);
+    return () => ipcRenderer.off('database-resumed', handler);
+  },
+  onDatabaseResumeFailed: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('database-resume-failed', handler);
+    return () => ipcRenderer.off('database-resume-failed', handler);
+  },
 
   // Cloud sync
   cloudPairingValidate: (payload: { apiBaseUrl: string; code: string; machineName?: string }) =>
     ipcRenderer.invoke('cloud-pairing-validate', payload),
+  cloudDeviceRegister: (payload: { apiBaseUrl: string; machineName?: string }) =>
+    ipcRenderer.invoke('cloud-device-register', payload),
+  cloudDevicePollStatus: (payload: { apiBaseUrl: string; deviceNonce: string }) =>
+    ipcRenderer.invoke('cloud-device-poll-status', payload),
   syncConnect: (config: any) => ipcRenderer.invoke('sync-connect', config),
   syncDisconnect: () => ipcRenderer.invoke('sync-disconnect'),
   cloudUnpair: () => ipcRenderer.invoke('cloud-unpair'),
@@ -123,6 +154,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cloudSyncFlush: () => ipcRenderer.invoke('cloud-sync-flush'),
   cloudSyncOnlineHint: () => ipcRenderer.invoke('cloud-sync-online-hint'),
   cloudZClose: (zPayload: any) => ipcRenderer.invoke('cloud-z-close', zPayload),
+  cloudCloseDayAck: (payload: {
+    requestId: string;
+    phase: 'received' | 'completed' | 'failed';
+    zReportId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  }) => ipcRenderer.invoke('cloud-close-day-ack', payload),
   cloudPurgeClosedDay: (tradingDayId: string) =>
     ipcRenderer.invoke('cloud-purge-closed-day', tradingDayId),
 
@@ -136,6 +174,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, info: { count: number }) => callback(info);
     ipcRenderer.on('pos-users-updated', handler);
     return () => ipcRenderer.off('pos-users-updated', handler);
+  },
+
+  settingsSyncNow: () => ipcRenderer.invoke('settings-sync-now'),
+  onSettingsUpdated: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('settings-updated', handler);
+    return () => ipcRenderer.off('settings-updated', handler);
+  },
+  onCloseDayRequested: (
+    callback: (payload: { requestId?: string; initiatedBy?: string; message?: string }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: { requestId?: string; initiatedBy?: string; message?: string }) =>
+      callback(payload);
+    ipcRenderer.on('close-day-requested', handler);
+    return () => ipcRenderer.off('close-day-requested', handler);
   },
 });
 

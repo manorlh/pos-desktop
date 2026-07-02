@@ -3,7 +3,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 import { VirtualKeyboardProvider } from './contexts/VirtualKeyboardContext';
-import { I18nProvider } from './i18n';
+import { I18nProvider, useI18n } from './i18n';
 import { useProductStore } from './stores/useProductStore';
 import { useTransactionStore } from './stores/useTransactionStore';
 import { useBusinessStore } from './stores/useBusinessStore';
@@ -11,18 +11,66 @@ import { useDatabaseStore } from './stores/useDatabaseStore';
 import { useSettingsStore } from './stores/useSettingsStore';
 import { useTradingDayStore } from './stores/useTradingDayStore';
 import { useAuthStore } from './stores/useAuthStore';
+import { Button } from './components/ui/button';
 import './globals.css';
 
-function App() {
+function InitErrorScreen({
+  error,
+  onRetry,
+  onRestart,
+  retrying,
+}: {
+  error: string;
+  onRetry: () => void;
+  onRestart: () => void;
+  retrying: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="h-screen bg-background flex items-center justify-center">
+      <div className="text-center max-w-md px-4">
+        <div className="text-destructive text-lg font-semibold mb-2">{t('app.initErrorTitle')}</div>
+        <p className="text-muted-foreground mb-3">{error}</p>
+        <p className="text-sm text-muted-foreground mb-6">{t('app.initErrorHint')}</p>
+        <div className="flex flex-wrap gap-2 justify-center mb-4">
+          <Button type="button" onClick={onRetry} disabled={retrying}>
+            {retrying ? t('common.loading') : t('app.initRetry')}
+          </Button>
+          <Button type="button" variant="outline" onClick={onRestart} disabled={retrying}>
+            {t('app.initRestart')}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{t('app.initSettingsHint')}</p>
+      </div>
+    </div>
+  );
+}
+
+async function reloadAppDataFromDatabase(): Promise<void> {
+  const { loadProducts, loadCategories } = useProductStore.getState();
+  await loadProducts();
+  await loadCategories();
+  const { loadFromDatabase } = useBusinessStore.getState();
+  await loadFromDatabase();
+  const { loadTodaysTransactions } = useTransactionStore.getState();
+  await loadTodaysTransactions();
+  const { loadCurrentTradingDay } = useTradingDayStore.getState();
+  await loadCurrentTradingDay();
+  const { loadSettings } = useSettingsStore.getState();
+  await loadSettings();
+}
+
+function AppShell() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [language, setLanguage] = useState<'he' | 'en'>('he');
   const [paired, setPaired] = useState(false);
   const [hasUsers, setHasUsers] = useState(false);
 
   const posUser = useAuthStore((s) => s.posUser);
-  const { setDbPath } = useDatabaseStore();
-  const { businessInfo, softwareInfo } = useBusinessStore();
+  const setDbPath = useDatabaseStore((s) => s.setDbPath);
+  const { t } = useI18n();
 
   const refreshOnboardingState = useCallback(async () => {
     try {
@@ -41,85 +89,92 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
-    initializeApp();
-  }, []);
-
-  const initializeApp = async () => {
+  const initializeApp = useCallback(async (opts?: { showSpinner?: boolean }) => {
+    const showSpinner = opts?.showSpinner !== false;
+    if (showSpinner) {
+      setInitError(null);
+      setIsInitializing(true);
+    }
     try {
-      // Check if Electron API is available
       if (!window.electronAPI) {
         throw new Error('Electron API not available');
       }
 
-      // Get database path and initialize
       const dbPath = await window.electronAPI.getDatabasePath();
       setDbPath(dbPath);
-      
-      // Initialize database
+
       const initResult = await window.electronAPI.initializeDatabase(dbPath);
       if (!initResult.success) {
         throw new Error(initResult.error || 'Failed to initialize database');
       }
 
-      // Check if database is empty (first run)
       const existingProducts = await window.electronAPI.dbGetProducts();
       const existingCategories = await window.electronAPI.dbGetCategories();
 
-      // First run: persist bundled business config when catalog is still empty
+      const { businessInfo, softwareInfo } = useBusinessStore.getState();
       if (existingProducts.length === 0 && existingCategories.length === 0) {
         await window.electronAPI.dbSaveBusinessInfo(businessInfo);
         await window.electronAPI.dbSaveSoftwareInfo(softwareInfo);
       }
-      
-      // Load data into stores
-      const { loadProducts, loadCategories } = useProductStore.getState();
-      await loadProducts();
-      await loadCategories();
-      
-      // Pos users (cashier identities) come from cloud sync (see electron/posUserSync.ts);
-      // login is handled by useAuthStore + LoginScreen below.
+
+      await reloadAppDataFromDatabase();
       await refreshOnboardingState();
 
-      // Load business info
-      const { loadFromDatabase } = useBusinessStore.getState();
-      await loadFromDatabase();
-      
-      // Load today's transactions
-      const { loadTodaysTransactions } = useTransactionStore.getState();
-      await loadTodaysTransactions();
-      
-      // Load current trading day status
-      const { loadCurrentTradingDay } = useTradingDayStore.getState();
-      await loadCurrentTradingDay();
-      
-      // Load settings and set language
-      const { loadSettings, language: settingsLanguage } = useSettingsStore.getState();
-      await loadSettings();
       const currentLanguage = useSettingsStore.getState().language;
       setLanguage(currentLanguage);
-      
-      setIsInitializing(false);
-    } catch (error: any) {
+
+      if (showSpinner) {
+        setIsInitializing(false);
+      }
+      setInitError(null);
+    } catch (error: unknown) {
       console.error('Failed to initialize app:', error);
-      setInitError(error.message || 'Failed to initialize application');
+      const message = error instanceof Error ? error.message : 'Failed to initialize application';
+      setInitError(message);
       setIsInitializing(false);
     }
-  };
+  }, [refreshOnboardingState, setDbPath]);
 
-  // Subscribe to language changes
+  useEffect(() => {
+    void initializeApp();
+  }, [initializeApp]);
+
+  useEffect(() => {
+    const unsubResume = window.electronAPI?.onDatabaseResumed?.(() => {
+      void (async () => {
+        try {
+          await reloadAppDataFromDatabase();
+          await refreshOnboardingState();
+          setInitError(null);
+          setIsInitializing(false);
+        } catch (error: unknown) {
+          console.error('[App] refresh after DB resume failed:', error);
+          const message = error instanceof Error ? error.message : 'Failed to refresh after wake';
+          setInitError(message);
+          setIsInitializing(false);
+        }
+      })();
+    });
+    const unsubFailed = window.electronAPI?.onDatabaseResumeFailed?.(() => {
+      setInitError((prev) => prev ?? 'Unable to reopen database after sleep');
+      setIsInitializing(false);
+    });
+    return () => {
+      unsubResume?.();
+      unsubFailed?.();
+    };
+  }, [refreshOnboardingState]);
+
   useEffect(() => {
     const unsubscribe = useSettingsStore.subscribe(
       (state) => state.language,
       (newLanguage) => {
         setLanguage(newLanguage);
-      }
+      },
     );
     return unsubscribe;
   }, []);
 
-  // Refresh product/category stores when the main process applies a cloud catalog pull,
-  // so price/name edits from the cloud show up without a manual page refresh.
   useEffect(() => {
     if (!window.electronAPI?.onCatalogUpdated) return;
     const unsubscribe = window.electronAPI.onCatalogUpdated(() => {
@@ -140,7 +195,6 @@ function App() {
     return unsubscribe;
   }, []);
 
-  // Refresh hasUsers gate when the main process applies a pos_users pull.
   useEffect(() => {
     if (!window.electronAPI?.onPosUsersUpdated) return;
     const unsubscribe = window.electronAPI.onPosUsersUpdated(() => {
@@ -149,7 +203,6 @@ function App() {
     return unsubscribe;
   }, [refreshOnboardingState]);
 
-  // When the OS reports the network came back, nudge the main-process tx outbox to drain.
   useEffect(() => {
     if (!window.electronAPI?.cloudSyncOnlineHint) return;
     const handler = () => {
@@ -159,12 +212,25 @@ function App() {
     return () => window.removeEventListener('online', handler);
   }, []);
 
+  const handleRetryInit = async () => {
+    setRetrying(true);
+    try {
+      await initializeApp();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleRestartApp = () => {
+    void window.electronAPI?.appRestart?.();
+  };
+
   if (isInitializing) {
     return (
       <div className="h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Initializing application...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">{t('app.initializing')}</p>
         </div>
       </div>
     );
@@ -172,15 +238,12 @@ function App() {
 
   if (initError) {
     return (
-      <div className="h-screen bg-background flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="text-destructive text-lg font-semibold mb-2">Initialization Error</div>
-          <p className="text-muted-foreground mb-4">{initError}</p>
-          <p className="text-sm text-muted-foreground">
-            The application will continue with limited functionality. Please check your database settings.
-          </p>
-        </div>
-      </div>
+      <InitErrorScreen
+        error={initError}
+        onRetry={() => void handleRetryInit()}
+        onRestart={handleRestartApp}
+        retrying={retrying}
+      />
     );
   }
 
@@ -197,6 +260,14 @@ function App() {
   );
 }
 
+function App() {
+  return (
+    <I18nProvider defaultLanguage="he">
+      <AppShell />
+    </I18nProvider>
+  );
+}
+
 interface AppContentProps {
   paired: boolean;
   hasUsers: boolean;
@@ -206,12 +277,8 @@ interface AppContentProps {
 }
 
 function AppContent({ paired, hasUsers, loggedIn, onPaired, refreshOnboarding }: AppContentProps) {
-  // VirtualKeyboardProvider must wrap every screen that may render shared `Input` /
-  // `Dialog` components — including OnboardingScreen and LoginScreen — because those
-  // components call `useVirtualKeyboard` internally.
   return (
     <VirtualKeyboardProvider>
-      {/* Hard gate: onboarding → login → till. Enforced once at the top so per-page guards aren't needed. */}
       {!paired || !hasUsers ? (
         <OnboardingScreen
           paired={paired}

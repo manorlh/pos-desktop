@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText, Trash2, Cloud } from 'lucide-react';
+import { Settings, Database, FolderOpen, CheckCircle, AlertCircle, Download, Keyboard, Percent, Languages, CreditCard, FileText, Trash2, Cloud, Printer } from 'lucide-react';
+import type { Printer as PrinterDevice } from '@/types/electron';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -19,6 +20,7 @@ type CloudPairSession = {
   apiBaseUrl: string;
   accessToken: string;
   machineId: string;
+  tenantId: string;
   merchantId: string;
   shopId: string;
   mqttHost: string;
@@ -44,6 +46,10 @@ export function SettingsPage() {
     nayaxDeviceHost,
     nayaxDevicePort,
     nayaxSpicyPath,
+    receiptPrinterName,
+    drawerPrinterName,
+    localReceiptPrinterName,
+    localDrawerPrinterName,
     loadSettings,
     setVirtualKeyboardEnabled,
     setGlobalTaxRate,
@@ -53,6 +59,8 @@ export function SettingsPage() {
     setNayaxDeviceHost,
     setNayaxDevicePort,
     setNayaxSpicyPath,
+    setLocalReceiptPrinterName,
+    setLocalDrawerPrinterName,
   } = useSettingsStore();
   const { filterProducts, loadProducts, loadCategories } = useProductStore();
   const { t, setLanguage: setI18nLanguage, locale } = useI18n();
@@ -60,6 +68,8 @@ export function SettingsPage() {
   const [nayaxHostInput, setNayaxHostInput] = useState('');
   const [nayaxPortInput, setNayaxPortInput] = useState('');
   const [nayaxPathInput, setNayaxPathInput] = useState('');
+  const [osPrinters, setOsPrinters] = useState<PrinterDevice[]>([]);
+  const [isRefreshingPrinters, setIsRefreshingPrinters] = useState(false);
   const [isTestingNayax, setIsTestingNayax] = useState(false);
   const [nayaxResult, setNayaxResult] = useState<{ success: boolean; message: string } | null>(null);
   const [integrationLogs, setIntegrationLogs] = useState<
@@ -108,7 +118,9 @@ export function SettingsPage() {
       apiBaseUrl: session.apiBaseUrl,
       accessToken: session.accessToken,
       machineId: session.machineId,
-      merchantId: session.merchantId || '',
+      tenantId: session.tenantId || session.merchantId,
+      merchantId: session.merchantId || session.tenantId,
+      shopId: session.shopId,
       host: session.mqttHost,
       port: session.mqttPort,
       clientId: session.mqttClientId,
@@ -117,10 +129,36 @@ export function SettingsPage() {
     });
   };
 
+  const cloudSettingsManaged = syncStatus?.enabled === true;
+
   useEffect(() => {
     loadDatabasePath();
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    void loadOsPrinters();
+  }, []);
+
+  const loadOsPrinters = async () => {
+    if (!window.electronAPI?.getPrinters) return;
+    setIsRefreshingPrinters(true);
+    try {
+      const list = await window.electronAPI.getPrinters();
+      setOsPrinters(list);
+    } catch (e) {
+      console.error('Failed to load printers', e);
+    } finally {
+      setIsRefreshingPrinters(false);
+    }
+  };
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onSettingsUpdated?.(() => {
+      void loadSettings();
+    });
+    return () => unsub?.();
+  }, [loadSettings]);
 
   useEffect(() => {
     void (async () => {
@@ -337,7 +375,8 @@ export function SettingsPage() {
         apiBaseUrl: res.apiBaseUrl,
         accessToken: res.accessToken,
         machineId: res.machineId,
-        merchantId: res.merchantId,
+        tenantId: res.tenantId || res.merchantId || '',
+        merchantId: res.merchantId || res.tenantId || '',
         shopId: res.shopId,
         mqttHost: res.mqttHost,
         mqttPort: res.mqttPort,
@@ -377,7 +416,8 @@ export function SettingsPage() {
       }
       const next: CloudPairSession = {
         ...cloudSession,
-        merchantId: r.merchantId || cloudSession.merchantId,
+        tenantId: r.tenantId || r.merchantId || cloudSession.tenantId,
+        merchantId: r.merchantId || r.tenantId || cloudSession.merchantId,
         shopId: r.shopId || cloudSession.shopId,
       };
       setCloudSession(next);
@@ -391,6 +431,23 @@ export function SettingsPage() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setCloudMessage({ type: 'err', text: msg });
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudPullSettings = async () => {
+    if (!window.electronAPI?.settingsSyncNow) return;
+    setCloudBusy(true);
+    setCloudMessage(null);
+    try {
+      const r = await window.electronAPI.settingsSyncNow();
+      if (!r.ok) {
+        setCloudMessage({ type: 'err', text: r.error || t('settings.cloudSettingsPullFailed') });
+        return;
+      }
+      await loadSettings();
+      setCloudMessage({ type: 'ok', text: t('settings.cloudSettingsPullOk') });
     } finally {
       setCloudBusy(false);
     }
@@ -799,6 +856,14 @@ export function SettingsPage() {
             <Button
               type="button"
               variant="outline"
+              onClick={() => void handleCloudPullSettings()}
+              disabled={cloudBusy || !window.electronAPI?.settingsSyncNow}
+            >
+              {t('settings.cloudPullSettings')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => void handleCloudDisconnect()}
               disabled={cloudBusy || !window.electronAPI?.syncDisconnect}
             >
@@ -820,6 +885,11 @@ export function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {cloudSettingsManaged ? (
+            <Alert>
+              <AlertDescription>{t('settings.cloudManagedNote')}</AlertDescription>
+            </Alert>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="tax-rate">{t('settings.taxRate')}</Label>
             <div className="flex gap-2">
@@ -833,8 +903,9 @@ export function SettingsPage() {
                 onChange={(e) => handleTaxRateChange(e.target.value)}
                 placeholder="8.00"
                 className="flex-1"
+                disabled={cloudSettingsManaged}
               />
-              <Button onClick={handleSaveTaxRate}>
+              <Button onClick={handleSaveTaxRate} disabled={cloudSettingsManaged}>
                 {t('settings.save')}
               </Button>
             </div>
@@ -842,6 +913,77 @@ export function SettingsPage() {
               {t('settings.taxIncludeNote')}
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Printer className="h-5 w-5" />
+            {t('settings.printersTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.printersDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>{t('settings.printersCloudReceipt')}</Label>
+              <Input value={receiptPrinterName || '—'} readOnly disabled className="bg-muted" />
+            </div>
+            <div className="space-y-1">
+              <Label>{t('settings.printersCloudDrawer')}</Label>
+              <Input value={drawerPrinterName || '—'} readOnly disabled className="bg-muted" />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="local-receipt-printer">{t('settings.printersLocalReceipt')}</Label>
+              <Select
+                value={localReceiptPrinterName || '__cloud__'}
+                onValueChange={(v) => void setLocalReceiptPrinterName(v === '__cloud__' ? '' : v)}
+              >
+                <SelectTrigger id="local-receipt-printer">
+                  <SelectValue placeholder={t('settings.printersUseCloud')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__cloud__">{t('settings.printersUseCloud')}</SelectItem>
+                  {osPrinters.map((p) => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.displayName || p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="local-drawer-printer">{t('settings.printersLocalDrawer')}</Label>
+              <Select
+                value={localDrawerPrinterName || '__cloud__'}
+                onValueChange={(v) => void setLocalDrawerPrinterName(v === '__cloud__' ? '' : v)}
+              >
+                <SelectTrigger id="local-drawer-printer">
+                  <SelectValue placeholder={t('settings.printersUseCloud')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__cloud__">{t('settings.printersUseCloud')}</SelectItem>
+                  {osPrinters.map((p) => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.displayName || p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {osPrinters.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('settings.printersNoneFound')}</p>
+          ) : null}
+
+          <Button type="button" variant="outline" onClick={() => void loadOsPrinters()} disabled={isRefreshingPrinters}>
+            {isRefreshingPrinters ? t('settings.testing') : t('settings.printersRefresh')}
+          </Button>
         </CardContent>
       </Card>
 
@@ -864,6 +1006,7 @@ export function SettingsPage() {
               id="nayax-enabled"
               checked={nayaxEnabled}
               onCheckedChange={setNayaxEnabled}
+              disabled={cloudSettingsManaged}
             />
           </div>
 
@@ -876,6 +1019,7 @@ export function SettingsPage() {
                 onChange={(e) => setNayaxHostInput(e.target.value)}
                 placeholder={t('settings.nayaxHostPlaceholder')}
                 autoComplete="off"
+                disabled={cloudSettingsManaged}
               />
             </div>
             <div className="space-y-2">
@@ -886,6 +1030,7 @@ export function SettingsPage() {
                 onChange={(e) => setNayaxPortInput(e.target.value)}
                 placeholder="8080"
                 autoComplete="off"
+                disabled={cloudSettingsManaged}
               />
             </div>
             <div className="space-y-2">
@@ -896,6 +1041,7 @@ export function SettingsPage() {
                 onChange={(e) => setNayaxPathInput(e.target.value)}
                 placeholder={t('settings.nayaxPathPlaceholder')}
                 autoComplete="off"
+                disabled={cloudSettingsManaged}
               />
             </div>
           </div>
@@ -912,14 +1058,19 @@ export function SettingsPage() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={handleSaveNayaxConnection}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSaveNayaxConnection}
+              disabled={cloudSettingsManaged}
+            >
               {t('settings.nayaxSaveConnection')}
             </Button>
             <Button
               type="button"
               variant="outline"
               onClick={handleNayaxTest}
-              disabled={isTestingNayax || !nayaxHostInput.trim()}
+              disabled={isTestingNayax || !nayaxHostInput.trim() || cloudSettingsManaged}
             >
               {isTestingNayax ? t('settings.nayaxTesting') : t('settings.nayaxTestDevice')}
             </Button>
@@ -1037,6 +1188,7 @@ export function SettingsPage() {
             <Switch
               id="hide-out-of-stock"
               checked={hideOutOfStockProducts}
+              disabled={cloudSettingsManaged}
               onCheckedChange={async (checked) => {
                 await setHideOutOfStockProducts(checked);
                 // Re-filter products to reflect the setting change
@@ -1051,6 +1203,7 @@ export function SettingsPage() {
             </Label>
             <Select
               value={language}
+              disabled={cloudSettingsManaged}
               onValueChange={async (value: 'he' | 'en') => {
                 setI18nLanguage(value);
                 await setLanguage(value);

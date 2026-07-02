@@ -1,18 +1,35 @@
 import { create } from 'zustand';
+import { resolveEffectivePrinters } from '@/utils/printerRouting';
 
 type Language = 'he' | 'en';
+type OutOfStockPolicy = 'block' | 'warn' | 'allow';
+type TipDistribution = 'direct' | 'equal_pool' | 'by_sales';
 
 interface SettingsStore {
   virtualKeyboardEnabled: boolean;
   globalTaxRate: number; // Tax rate as decimal (e.g., 0.18 for 18%)
   hideOutOfStockProducts: boolean;
+  outOfStockPolicy: OutOfStockPolicy;
+  tipsEnabled: boolean;
+  cashTipsEnabled: boolean;
+  tipPresets: number[];
+  tipDistribution: TipDistribution;
   language: Language;
   nayaxEnabled: boolean;
   nayaxDeviceHost: string;
   nayaxDevicePort: string;
   nayaxSpicyPath: string;
+  /** Cloud-synced default receipt printer name (e.g. BB). */
+  receiptPrinterName: string;
+  /** Cloud-synced drawer printer name (e.g. BBILL). */
+  drawerPrinterName: string;
+  /** Device-local override for receipt printer; empty = use cloud. */
+  localReceiptPrinterName: string;
+  /** Device-local override for drawer printer; empty = use cloud. */
+  localDrawerPrinterName: string;
   isLoading: boolean;
   loadSettings: () => Promise<void>;
+  getEffectivePrinters: () => { receiptPrinterName: string | undefined; drawerPrinterName: string | undefined };
   setVirtualKeyboardEnabled: (enabled: boolean) => Promise<void>;
   setGlobalTaxRate: (rate: number) => Promise<void>;
   setHideOutOfStockProducts: (hide: boolean) => Promise<void>;
@@ -21,18 +38,37 @@ interface SettingsStore {
   setNayaxDeviceHost: (host: string) => Promise<void>;
   setNayaxDevicePort: (port: string) => Promise<void>;
   setNayaxSpicyPath: (spicyPath: string) => Promise<void>;
+  setLocalReceiptPrinterName: (name: string) => Promise<void>;
+  setLocalDrawerPrinterName: (name: string) => Promise<void>;
 }
 
-export const useSettingsStore = create<SettingsStore>((set) => ({
-  virtualKeyboardEnabled: true, // Default to enabled
-  globalTaxRate: 0.18, // Israel standard VAT 18%
+export const useSettingsStore = create<SettingsStore>((set, get) => ({
+  virtualKeyboardEnabled: true,
+  globalTaxRate: 0.18,
   hideOutOfStockProducts: false,
-  language: 'he', // Default to Hebrew
+  outOfStockPolicy: 'allow' as OutOfStockPolicy,
+  tipsEnabled: false,
+  cashTipsEnabled: false,
+  tipPresets: [10, 12, 15],
+  tipDistribution: 'direct' as TipDistribution,
+  language: 'he',
   nayaxEnabled: false,
   nayaxDeviceHost: '',
   nayaxDevicePort: '8080',
   nayaxSpicyPath: '/SPICy',
+  receiptPrinterName: '',
+  drawerPrinterName: '',
+  localReceiptPrinterName: '',
+  localDrawerPrinterName: '',
   isLoading: true,
+
+  getEffectivePrinters: () =>
+    resolveEffectivePrinters({
+      receiptPrinterName: get().receiptPrinterName,
+      drawerPrinterName: get().drawerPrinterName,
+      localReceiptPrinterName: get().localReceiptPrinterName,
+      localDrawerPrinterName: get().localDrawerPrinterName,
+    }),
 
   loadSettings: async () => {
     try {
@@ -45,16 +81,52 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
         const nayaxDeviceHost = await window.electronAPI.dbGetSetting('nayaxDeviceHost');
         const nayaxDevicePort = await window.electronAPI.dbGetSetting('nayaxDevicePort');
         const nayaxSpicyPath = await window.electronAPI.dbGetSetting('nayaxSpicyPath');
-        
+        const outOfStockPolicy = await window.electronAPI.dbGetSetting('outOfStockPolicy');
+        const tipsEnabled = await window.electronAPI.dbGetSetting('tipsEnabled');
+        const cashTipsEnabled = await window.electronAPI.dbGetSetting('cashTipsEnabled');
+        const tipPresetsRaw = await window.electronAPI.dbGetSetting('tipPresets');
+        const tipDistribution = await window.electronAPI.dbGetSetting('tipDistribution');
+        const receiptPrinterName = await window.electronAPI.dbGetSetting('receiptPrinterName');
+        const drawerPrinterName = await window.electronAPI.dbGetSetting('drawerPrinterName');
+        const localReceiptPrinterName = await window.electronAPI.dbGetSetting('localReceiptPrinterName');
+        const localDrawerPrinterName = await window.electronAPI.dbGetSetting('localDrawerPrinterName');
+
+        let tipPresets = [10, 12, 15];
+        if (tipPresetsRaw) {
+          try {
+            const parsed = JSON.parse(tipPresetsRaw) as unknown;
+            if (Array.isArray(parsed) && parsed.every((n) => typeof n === 'number')) {
+              tipPresets = parsed as number[];
+            }
+          } catch {
+            /* keep default */
+          }
+        }
+
         set({
           virtualKeyboardEnabled: enabled === null ? true : enabled === 'true',
-          globalTaxRate: taxRateStr === null ? 0.18 : parseFloat(taxRateStr) / 100, // Convert percentage to decimal
+          globalTaxRate: taxRateStr === null ? 0.18 : parseFloat(taxRateStr) / 100,
           hideOutOfStockProducts: hideOutOfStock === null ? false : hideOutOfStock === 'true',
-          language: (language === 'en' || language === 'he') ? language : 'he',
+          outOfStockPolicy:
+            outOfStockPolicy === 'block' || outOfStockPolicy === 'warn' || outOfStockPolicy === 'allow'
+              ? outOfStockPolicy
+              : 'allow',
+          tipsEnabled: tipsEnabled === 'true',
+          cashTipsEnabled: cashTipsEnabled === 'true',
+          tipPresets,
+          tipDistribution:
+            tipDistribution === 'equal_pool' || tipDistribution === 'by_sales' || tipDistribution === 'direct'
+              ? tipDistribution
+              : 'direct',
+          language: language === 'en' || language === 'he' ? language : 'he',
           nayaxEnabled: nayaxEnabled === 'true',
           nayaxDeviceHost: nayaxDeviceHost ?? '',
           nayaxDevicePort: nayaxDevicePort ?? '8080',
           nayaxSpicyPath: nayaxSpicyPath ?? '/SPICy',
+          receiptPrinterName: receiptPrinterName ?? '',
+          drawerPrinterName: drawerPrinterName ?? '',
+          localReceiptPrinterName: localReceiptPrinterName ?? '',
+          localDrawerPrinterName: localDrawerPrinterName ?? '',
           isLoading: false,
         });
       } else {
@@ -74,7 +146,6 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
           set({ virtualKeyboardEnabled: enabled });
         }
       } else {
-        // Fallback for development without electron
         set({ virtualKeyboardEnabled: enabled });
       }
     } catch (error) {
@@ -85,13 +156,11 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
   setGlobalTaxRate: async (rate: number) => {
     try {
       if (window.electronAPI) {
-        // Store as percentage (e.g., 8 for 8%)
         const result = await window.electronAPI.dbSaveSetting('globalTaxRate', String(rate));
         if (result.success) {
-          set({ globalTaxRate: rate / 100 }); // Convert percentage to decimal for internal use
+          set({ globalTaxRate: rate / 100 });
         }
       } else {
-        // Fallback for development without electron
         set({ globalTaxRate: rate / 100 });
       }
     } catch (error) {
@@ -107,7 +176,6 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
           set({ hideOutOfStockProducts: hide });
         }
       } else {
-        // Fallback for development without electron
         set({ hideOutOfStockProducts: hide });
       }
     } catch (error) {
@@ -123,7 +191,6 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
           set({ language });
         }
       } else {
-        // Fallback for development without electron
         set({ language });
       }
     } catch (error) {
@@ -182,5 +249,30 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
       console.error('Failed to save nayaxSpicyPath:', error);
     }
   },
-}));
 
+  setLocalReceiptPrinterName: async (name: string) => {
+    try {
+      if (window.electronAPI) {
+        const result = await window.electronAPI.dbSaveSetting('localReceiptPrinterName', name);
+        if (result.success) set({ localReceiptPrinterName: name });
+      } else {
+        set({ localReceiptPrinterName: name });
+      }
+    } catch (error) {
+      console.error('Failed to save localReceiptPrinterName:', error);
+    }
+  },
+
+  setLocalDrawerPrinterName: async (name: string) => {
+    try {
+      if (window.electronAPI) {
+        const result = await window.electronAPI.dbSaveSetting('localDrawerPrinterName', name);
+        if (result.success) set({ localDrawerPrinterName: name });
+      } else {
+        set({ localDrawerPrinterName: name });
+      }
+    } catch (error) {
+      console.error('Failed to save localDrawerPrinterName:', error);
+    }
+  },
+}));

@@ -21,6 +21,9 @@ export interface ReceiptPrintPayload {
   language?: ReceiptLanguage;
   categoryNames?: Record<string, string>;
   printedAt?: string;
+  isCopy?: boolean;
+  isRefund?: boolean;
+  originalDocNumber?: string;
 }
 
 export interface SerializedReceiptTransaction {
@@ -29,6 +32,8 @@ export interface SerializedReceiptTransaction {
   paymentMethod?: 'cash' | 'card';
   amountTendered?: number;
   changeAmount?: number;
+  tipAmount?: number;
+  tipPaymentMethod?: 'cash' | 'card';
   cashier: { name: string };
   cart: {
     items: Array<{
@@ -47,7 +52,11 @@ export interface SerializedReceiptTransaction {
 const LABELS = {
   he: {
     docTitle: 'חשבונית מס/קבלה',
+    docTitleRefund: 'חשבונית זיכוי',
+    refundOf: 'זיכוי עבור מסמך',
+    amountRefunded: 'סכום זיכוי',
     docSource: 'מקור',
+    docCopy: 'העתק',
     systemLabel: 'POS-DATA',
     issueDate: 'תאריך הנפקת חשבונית:',
     printTime: 'זמן הדפסה:',
@@ -65,6 +74,8 @@ const LABELS = {
     vat: 'מע"מ',
     paymentCash: 'מזומן',
     paymentCard: 'כרטיס אשראי',
+    tip: 'תשר',
+    grandTotal: 'סה"כ לתשלום',
     changeDue: 'עודף',
     regNumber: 'ח.פ.',
     phone: 'טלפון:',
@@ -74,7 +85,11 @@ const LABELS = {
   },
   en: {
     docTitle: 'Tax invoice / receipt',
+    docTitleRefund: 'Credit note / Refund',
+    refundOf: 'Refund for document',
+    amountRefunded: 'Amount refunded',
     docSource: 'Original',
+    docCopy: 'Copy',
     systemLabel: 'POS-DATA',
     issueDate: 'Invoice date:',
     printTime: 'Print time:',
@@ -92,6 +107,8 @@ const LABELS = {
     vat: 'VAT',
     paymentCash: 'Cash',
     paymentCard: 'Credit card',
+    tip: 'Tip',
+    grandTotal: 'Total due',
     changeDue: 'Change',
     regNumber: 'Reg. no.',
     phone: 'Phone:',
@@ -176,19 +193,24 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
   const addressLines = buildAddressLines(businessInfo);
   const regNo = businessInfo.companyRegNumber || businessInfo.vatNumber || '—';
   const docNum = displayDocNumber(transaction.transactionNumber);
+  const docSourceLabel = payload.isCopy ? L.docCopy : L.docSource;
+  const isRefund = payload.isRefund === true;
+  const docTitle = isRefund ? L.docTitleRefund : L.docTitle;
   const cashierName = transaction.cashier?.name || '—';
   const paymentLabel =
     transaction.paymentMethod === 'card' ? L.paymentCard : L.paymentCash;
+  const tipAmount = transaction.tipAmount ?? 0;
+  const totalAmount = transaction.cart.totalAmount;
+  const grandTotal = totalAmount + tipAmount;
   const paymentAmount =
-    transaction.paymentMethod === 'cash'
-      ? (transaction.amountTendered ?? transaction.cart.totalAmount)
-      : transaction.cart.totalAmount;
+    transaction.paymentMethod === 'card'
+      ? grandTotal
+      : (transaction.amountTendered ?? grandTotal);
   const changeAmount = transaction.changeAmount ?? 0;
 
   const vatPercent = (globalTaxRate * 100).toFixed(1);
   const beforeVat = transaction.cart.subtotal;
   const vatAmount = transaction.cart.taxAmount;
-  const totalAmount = transaction.cart.totalAmount;
 
   const itemGroups = groupItemsByCategory(transaction.cart.items, categoryNames, L.defaultCategory);
 
@@ -227,8 +249,13 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
     .join('');
 
   const changeRow =
-    transaction.paymentMethod === 'cash' && changeAmount > 0
+    !isRefund && transaction.paymentMethod === 'cash' && changeAmount > 0
       ? `<div class="row payment"><span>${esc(L.changeDue)}</span><span>${formatTotalMoney(changeAmount)}</span></div>`
+      : '';
+
+  const refundOfRow =
+    isRefund && payload.originalDocNumber
+      ? `<div class="refund-of">${esc(L.refundOf)} #${esc(displayDocNumber(payload.originalDocNumber))}</div>`
       : '';
 
   return `<!DOCTYPE html>
@@ -320,6 +347,11 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
     .doc-source {
       font-size: 12pt;
       margin-top: 2px;
+    }
+    .refund-of {
+      text-align: right;
+      font-size: 11pt;
+      margin-bottom: 4px;
     }
 
     /* ── Dates ── */
@@ -433,10 +465,12 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
       <div class="doc-number">${esc(docNum)}</div>
     </div>
     <div class="doc-right">
-      <div class="doc-title">${esc(L.docTitle)}</div>
-      <div class="doc-source">${esc(L.docSource)}</div>
+      <div class="doc-title">${esc(docTitle)}</div>
+      <div class="doc-source">${esc(docSourceLabel)}</div>
     </div>
   </div>
+
+  ${refundOfRow}
 
   <div class="dates-row">
     <div class="date-cell">
@@ -464,7 +498,9 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
     <div class="row"><span>${esc(L.totalItems)}</span><span>${formatTotalMoney(totalAmount)}</span></div>
     <div class="row"><span>${esc(L.beforeVat)}</span><span>${formatTotalMoney(beforeVat)}</span></div>
     <div class="row"><span>${esc(L.vat)} ${vatPercent}%</span><span>${formatTotalMoney(vatAmount)}</span></div>
-    <div class="row payment"><span>${esc(paymentLabel)}</span><span>${formatTotalMoney(paymentAmount)}</span></div>
+    ${tipAmount > 0 ? `<div class="row"><span>${esc(L.tip)}</span><span>${formatTotalMoney(tipAmount)}</span></div>` : ''}
+    ${tipAmount > 0 ? `<div class="row"><span>${esc(L.grandTotal)}</span><span>${formatTotalMoney(grandTotal)}</span></div>` : ''}
+    <div class="row payment"><span>${esc(isRefund ? L.amountRefunded : paymentLabel)}</span><span>${formatTotalMoney(isRefund ? (transaction.amountTendered ?? grandTotal) : paymentAmount)}</span></div>
     ${changeRow}
   </div>
 

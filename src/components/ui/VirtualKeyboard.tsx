@@ -229,37 +229,37 @@ export function VirtualKeyboard({
     ['0', '.', 'Backspace'],
   ];
 
-  // Hebrew keyboard layout (QWERTY-based Hebrew)
+  // Hebrew keyboard layout (QWERTY-based Hebrew) — number row on top, like a physical keyboard
   const hebrewLayout = isShift
     ? [
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['/', '׳', 'ק', 'ר', 'א', 'ט', 'ו', 'ן', 'ם', 'פ'],
         ['ש', 'ד', 'ג', 'כ', 'ע', 'י', 'ח', 'ל', 'ך', 'ף'],
         ['Shift', 'ז', 'ס', 'ב', 'ה', 'נ', 'מ', 'צ', 'ת', 'ץ', 'Backspace'],
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Space', '-', '_', '.', ',', 'Enter'],
       ]
     : [
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['/', '׳', 'ק', 'ר', 'א', 'ט', 'ו', 'ן', 'ם', 'פ'],
         ['ש', 'ד', 'ג', 'כ', 'ע', 'י', 'ח', 'ל', 'ך', 'ף'],
         ['Shift', 'ז', 'ס', 'ב', 'ה', 'נ', 'מ', 'צ', 'ת', 'ץ', 'Backspace'],
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Space', '-', '_', '.', ',', 'Enter'],
       ];
 
-  // English keyboard layout
+  // English keyboard layout — number row on top, like a physical keyboard
   const englishLayout = isShift
     ? [
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
         ['Shift', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', 'Backspace'],
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Space', '-', '_', '.', '@', 'Enter'],
       ]
     : [
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
         ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
         ['Shift', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'Backspace'],
-        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Space', '-', '_', '.', '@', 'Enter'],
       ];
 
@@ -341,7 +341,7 @@ export function VirtualKeyboard({
         {/* Keyboard */}
         <div className="p-1.5 sm:p-2 short:p-1.5 pb-2">
           {layout.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex gap-0.5 sm:gap-1 short:gap-0.5 mb-0.5 sm:mb-1 short:mb-0.5 justify-center flex-wrap">
+            <div key={rowIndex} dir="ltr" className="flex gap-0.5 sm:gap-1 short:gap-0.5 mb-0.5 sm:mb-1 short:mb-0.5 w-full">
               {row.map((key) => {
                 const isSpecial = ['Backspace', 'Enter', 'Shift', 'Space', 'Clear'].includes(key);
                 const isWide = key === 'Space' || key === 'Enter' || key === 'Backspace';
@@ -352,11 +352,11 @@ export function VirtualKeyboard({
                     variant={isShift && key === 'Shift' ? 'default' : 'outline'}
                     className={cn(
                       'touch-manipulation active:scale-95 transition-transform font-semibold',
-                      'min-w-[28px] sm:min-w-[36px] short:min-w-[28px] md:min-w-[44px]',
+                      'flex-1 basis-0 min-w-0 px-0.5 sm:px-1',
                       'h-7 sm:h-9 short:h-7 md:h-10',
                       'text-[10px] sm:text-xs short:text-[10px] md:text-sm',
-                      'px-1 sm:px-1.5',
-                      isWide && 'flex-1 max-w-[72px] sm:max-w-[90px] short:max-w-[72px] md:max-w-[130px]',
+                      isWide && 'flex-[2.5]',
+                      key === 'Space' && 'flex-[4]',
                       isSpecial && 'bg-muted hover:bg-muted/80'
                     )}
                     onClick={() => handleKeyPress(key)}

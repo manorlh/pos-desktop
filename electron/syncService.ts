@@ -5,6 +5,7 @@
 
 import { cloudMqttClient, CloudMqttConfig } from './mqttClient';
 import { posUserSyncService } from './posUserSync';
+import { settingsSyncService } from './settingsSyncService';
 import { imageCacheService } from './imageCacheService';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -115,8 +116,14 @@ export class SyncService {
   private pullDebounce: NodeJS.Timeout | null = null;
 
   init(db: any): void {
+    if (!db || (typeof db.open === 'boolean' && !db.open)) {
+      return;
+    }
+    const dbChanged = this.db !== db;
     this.db = db;
-    this._ensureSchema();
+    if (dbChanged) {
+      this._ensureSchema();
+    }
   }
 
   /** Read cloud HTTP settings from SQLite (for pulls / API when MQTT not connected). */
@@ -148,6 +155,7 @@ export class SyncService {
         onMqttConnected: () => {
           this.pullCatalog();
           posUserSyncService.pullPosUsers();
+          settingsSyncService.pullSettings();
         },
       };
       cloudMqttClient.connect(cfg);
@@ -155,9 +163,10 @@ export class SyncService {
         if (cloudMqttClient.connected) cloudMqttClient.publishHeartbeat();
       }, 30000);
     } else {
-      console.warn('[Sync] No merchantId yet — MQTT disabled. Use GET /machines/me then reconnect or call pullCatalog.');
+      console.warn('[Sync] No tenant id for MQTT yet — HTTP sync only. Use GET /machines/me then reconnect.');
       this.pullCatalog();
       posUserSyncService.pullPosUsers();
+      settingsSyncService.pullSettings();
     }
   }
 
@@ -283,6 +292,7 @@ export class SyncService {
     const syncType = (data.syncType as string) || (data.sync_type as string) || 'full';
     const categories = (data.categories as unknown[]) || [];
     const products = (data.products as unknown[]) || [];
+    const vouchers = (data.vouchers as unknown[]) || [];
 
     // Bulk apply: parent categories may sort after children; delta may interleave rows.
     // defer_foreign_keys is unreliable in some SQLite builds; disable FK checks for this transaction only.
@@ -291,6 +301,9 @@ export class SyncService {
       try {
         for (const item of categories) {
           this._upsertCategory(item as Record<string, unknown>);
+        }
+        for (const item of vouchers) {
+          this._upsertVoucher(item as Record<string, unknown>);
         }
         for (const item of products) {
           this._upsertProduct(item as Record<string, unknown>);
@@ -302,7 +315,7 @@ export class SyncService {
     apply();
 
     this._updateLastSync();
-    console.log('[Sync] Applied catalog pull:', syncType, products.length, 'products,', categories.length, 'categories');
+    console.log('[Sync] Applied catalog pull:', syncType, products.length, 'products,', categories.length, 'categories,', vouchers.length, 'vouchers');
 
     void imageCacheService.prefetchCatalog().then(() => {
       console.log('[Sync] Product image cache updated');
@@ -320,7 +333,7 @@ export class SyncService {
 
     // Notify any open renderer windows so UI stores can refetch from SQLite.
     // Skip the empty-delta case to avoid forcing refetches when nothing changed.
-    if (products.length > 0 || categories.length > 0) {
+    if (products.length > 0 || categories.length > 0 || vouchers.length > 0) {
       try {
         const wins = BrowserWindow.getAllWindows();
         for (const w of wins) {
@@ -329,6 +342,7 @@ export class SyncService {
               syncType,
               products: products.length,
               categories: categories.length,
+              vouchers: vouchers.length,
             });
           }
         }
@@ -398,6 +412,32 @@ export class SyncService {
       posUserSyncService.pullPosUsers();
       return;
     }
+    if (parts.length >= 5 && parts[3] === 'settings' && parts[4] === 'notify') {
+      console.log('[Sync] settings/notify — pulling via HTTP');
+      settingsSyncService.pullSettings();
+      return;
+    }
+    if (parts.length >= 5 && parts[3] === 'close-day' && parts[4] === 'notify') {
+      console.log('[Sync] close-day/notify — forwarding to renderer');
+      const payload = _payload as {
+        requestId?: string;
+        initiatedBy?: string;
+        message?: string;
+      };
+      if (payload.requestId) {
+        // Lazy require avoids syncService ↔ transactionSync circular import at load time.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { transactionSyncService } = require('./transactionSync');
+        void transactionSyncService
+          .postCloseDayAck({ requestId: payload.requestId, phase: 'received' })
+          .catch((e: Error) => console.error('[Sync] close-day received ack failed', e));
+      }
+      const wins = BrowserWindow.getAllWindows();
+      for (const win of wins) {
+        win.webContents.send('close-day-requested', payload);
+      }
+      return;
+    }
   }
 
   private _upsertProduct(item: Record<string, unknown>): void {
@@ -428,7 +468,7 @@ export class SyncService {
         UPDATE products
         SET name = ?, description = ?, price = ?, sku = ?, categoryId = ?,
             imageUrl = ?, inStock = ?, isAvailable = ?, stockQuantity = ?, barcode = ?, taxRate = ?,
-            shopListed = ?, cloud_id = ?, cloud_synced = 1, last_cloud_sync = ?, updatedAt = ?
+            shopListed = ?, voucherId = ?, track_stock = ?, cloud_id = ?, cloud_synced = 1, last_cloud_sync = ?, updatedAt = ?
         WHERE id = ?
       `,
         )
@@ -445,6 +485,8 @@ export class SyncService {
           item.barcode,
           item.taxRate,
           shopListed,
+          item.voucherId || null,
+          item.trackStock === true ? 1 : 0,
           cloudId,
           nowIso(),
           incomingUpdatedAt,
@@ -456,8 +498,8 @@ export class SyncService {
           `
         INSERT OR IGNORE INTO products
           (id, name, description, price, sku, categoryId, imageUrl, inStock,
-           isAvailable, stockQuantity, barcode, taxRate, shopListed, cloud_id, cloud_synced, last_cloud_sync, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+           isAvailable, stockQuantity, barcode, taxRate, shopListed, voucherId, track_stock, cloud_id, cloud_synced, last_cloud_sync, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
       `,
         )
         .run(
@@ -474,11 +516,88 @@ export class SyncService {
           item.barcode,
           item.taxRate,
           shopListed,
+          item.voucherId || null,
+          item.trackStock === true ? 1 : 0,
           cloudId,
           nowIso(),
           item.createdAt,
           incomingUpdatedAt,
         );
+    }
+  }
+
+  private _upsertVoucher(item: Record<string, unknown>): void {
+    if (!this.db) return;
+    const cloudId = item.id as string;
+    const incomingUpdatedAt = (item.updatedAt as string) || nowIso();
+    const existing: any = this.db.prepare('SELECT * FROM vouchers WHERE cloud_id = ? OR id = ?').get(cloudId, cloudId);
+
+    const values = {
+      name: item.name,
+      is_active: item.isActive === false ? 0 : 1,
+      title: item.title ?? null,
+      subtitle: item.subtitle ?? null,
+      body_text: item.bodyText ?? null,
+      footer_text: item.footerText ?? null,
+      validity_days: item.validityDays ?? null,
+      value_display_mode: item.valueDisplayMode || 'product_price',
+      display_value: item.displayValue ?? null,
+      print_barcode: item.printBarcode === false ? 0 : 1,
+      print_qr: item.printQr === false ? 0 : 1,
+      language: item.language || 'he',
+      updated_at: incomingUpdatedAt,
+    };
+
+    if (existing) {
+      if (existing.updated_at && isIncomingOlderOrEqual(incomingUpdatedAt, existing.updated_at)) {
+        return;
+      }
+      this.db.prepare(`
+        UPDATE vouchers SET
+          name = ?, is_active = ?, title = ?, subtitle = ?, body_text = ?, footer_text = ?,
+          validity_days = ?, value_display_mode = ?, display_value = ?,
+          print_barcode = ?, print_qr = ?, language = ?, cloud_id = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        values.name,
+        values.is_active,
+        values.title,
+        values.subtitle,
+        values.body_text,
+        values.footer_text,
+        values.validity_days,
+        values.value_display_mode,
+        values.display_value,
+        values.print_barcode,
+        values.print_qr,
+        values.language,
+        cloudId,
+        values.updated_at,
+        existing.id,
+      );
+    } else {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO vouchers
+        (id, cloud_id, name, is_active, title, subtitle, body_text, footer_text,
+         validity_days, value_display_mode, display_value, print_barcode, print_qr, language, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        cloudId,
+        cloudId,
+        values.name,
+        values.is_active,
+        values.title,
+        values.subtitle,
+        values.body_text,
+        values.footer_text,
+        values.validity_days,
+        values.value_display_mode,
+        values.display_value,
+        values.print_barcode,
+        values.print_qr,
+        values.language,
+        values.updated_at,
+      );
     }
   }
 
@@ -555,6 +674,8 @@ export class SyncService {
       'last_cloud_sync TEXT',
       'shopListed INTEGER NOT NULL DEFAULT 1',
       'isAvailable INTEGER NOT NULL DEFAULT 1',
+      'voucherId TEXT',
+      'track_stock INTEGER NOT NULL DEFAULT 0',
     ]) {
       try {
         this.db.exec(`ALTER TABLE products ADD COLUMN ${col}`);
@@ -599,6 +720,73 @@ export class SyncService {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status, created_at)
     `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS vouchers (
+        id TEXT PRIMARY KEY,
+        cloud_id TEXT UNIQUE,
+        name TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        title TEXT,
+        subtitle TEXT,
+        body_text TEXT,
+        footer_text TEXT,
+        validity_days INTEGER,
+        value_display_mode TEXT NOT NULL DEFAULT 'product_price',
+        display_value REAL,
+        print_barcode INTEGER NOT NULL DEFAULT 1,
+        print_qr INTEGER NOT NULL DEFAULT 1,
+        language TEXT DEFAULT 'he',
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS issued_vouchers (
+        id TEXT PRIMARY KEY,
+        transaction_id TEXT NOT NULL,
+        transaction_item_id TEXT,
+        voucher_id TEXT,
+        product_id TEXT,
+        product_name TEXT,
+        quantity REAL NOT NULL DEFAULT 1,
+        unit_value REAL,
+        face_value REAL,
+        issued_at TEXT NOT NULL,
+        expires_at TEXT,
+        status TEXT NOT NULL DEFAULT 'issued',
+        reprint_count INTEGER NOT NULL DEFAULT 0,
+        last_printed_at TEXT,
+        FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+      )
+    `);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_issued_vouchers_tx ON issued_vouchers(transaction_id)`);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS stock_levels (
+        product_id TEXT PRIMARY KEY,
+        cloud_product_id TEXT,
+        base_quantity REAL NOT NULL DEFAULT 0,
+        reorder_min INTEGER,
+        reorder_max INTEGER,
+        reorder_opt INTEGER,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        delta REAL NOT NULL,
+        reason TEXT NOT NULL,
+        transaction_id TEXT,
+        transaction_item_id TEXT,
+        synced INTEGER NOT NULL DEFAULT 0,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tx ON stock_movements(transaction_id)`);
   }
 
   private _updateLastSync(): void {

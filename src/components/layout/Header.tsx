@@ -1,4 +1,4 @@
-import { Clock, Menu } from 'lucide-react';
+import { Clock, Menu, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatDate } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -6,6 +6,7 @@ import { Badge } from '../ui/badge';
 import { useI18n } from '@/i18n';
 import { useTradingDayStore } from '@/stores/useTradingDayStore';
 import { AppVersionBadge } from './AppVersionBadge';
+import { OpenDrawerDialog } from '../pos/OpenDrawerDialog';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -13,6 +14,7 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { t, locale } = useI18n();
   const { isDayOpen, currentTradingDay } = useTradingDayStore();
 
@@ -40,6 +42,26 @@ export function Header({ onMenuClick }: HeaderProps) {
       </div>
       
       <div className="flex items-center gap-4">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="hidden sm:flex gap-2"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <Wallet className="h-4 w-4" />
+          {t('printer.openDrawer')}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="sm:hidden"
+          aria-label={t('printer.openDrawer')}
+          onClick={() => setDrawerOpen(true)}
+        >
+          <Wallet className="h-4 w-4" />
+        </Button>
         <AppVersionBadge />
         <div className="flex items-center gap-2">
           <Badge variant={isDayOpen ? 'default' : 'secondary'}>
@@ -56,6 +78,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           <span className="hidden sm:inline">{formatDate(currentTime, locale)}</span>
         </div>
       </div>
+      <OpenDrawerDialog open={drawerOpen} onOpenChange={setDrawerOpen} />
     </header>
   );
 }

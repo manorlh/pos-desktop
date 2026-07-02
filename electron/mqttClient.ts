@@ -131,6 +131,8 @@ export class CloudMqttClient {
     const topics = [
       `pos/${merchantId}/${machineId}/catalog/notify`,
       `pos/${merchantId}/${machineId}/pos-users/notify`,
+      `pos/${merchantId}/${machineId}/settings/notify`,
+      `pos/${merchantId}/${machineId}/close-day/notify`,
     ];
     for (const topic of topics) {
       this.client.subscribe(topic, { qos: 1 }, (err: Error | null) => {

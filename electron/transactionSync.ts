@@ -10,6 +10,7 @@
  */
 
 import { syncService } from './syncService';
+import { stockSyncService } from './stockSyncService';
 import { cloudMqttClient } from './mqttClient';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -54,6 +55,8 @@ type TxRow = {
   whtDeduction: number | null;
   refundOfTransactionId: string | null;
   nayaxMeta: string | null;
+  tipAmount: number | null;
+  tipPaymentMethod: string | null;
   tradingDayId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -87,6 +90,10 @@ export class TransactionSyncService {
   private isFlushing = false;
   private nextBackoffMs = BACKOFF_MIN_MS;
   private flushScheduled = false;
+
+  private _dbReady(): boolean {
+    return !!this.db && (typeof this.db.open !== 'boolean' || this.db.open);
+  }
 
   shutdown(): void {
     if (this.periodicTimer) {
@@ -136,6 +143,7 @@ export class TransactionSyncService {
 
   /** Schedule a non-blocking flush soon (debounced). */
   scheduleFlush(): void {
+    if (!this._dbReady()) return;
     if (this.flushScheduled) return;
     this.flushScheduled = true;
     setTimeout(() => {
@@ -201,6 +209,8 @@ export class TransactionSyncService {
       paymentMethod: tx.paymentMethod,
       amountTendered: tx.amountTendered,
       changeAmount: tx.changeAmount,
+      tipAmount: tx.tipAmount ?? 0,
+      tipPaymentMethod: tx.tipPaymentMethod ?? undefined,
       totalAmount: items.reduce((acc, it) => acc + (it.totalPrice ?? 0), 0),
       totalDiscount: null,
       documentDiscount: tx.documentDiscount,
@@ -244,12 +254,67 @@ export class TransactionSyncService {
           notes: it.notes,
         };
       }),
+      issuedVouchers: (this.db
+        .prepare('SELECT * FROM issued_vouchers WHERE transaction_id = ?')
+        .all(transactionId) as Array<Record<string, unknown>>).map((row) => {
+        let voucherId: string | null = (row.voucher_id as string) || null;
+        let productId: string | null = (row.product_id as string) || null;
+        if (voucherId) {
+          const vrow = this.db
+            .prepare('SELECT cloud_id FROM vouchers WHERE id = ? OR cloud_id = ?')
+            .get(voucherId, voucherId) as { cloud_id?: string } | undefined;
+          if (vrow?.cloud_id) voucherId = vrow.cloud_id;
+        }
+        if (productId) {
+          const prow = this.db
+            .prepare('SELECT cloud_id FROM products WHERE id = ?')
+            .get(productId) as { cloud_id?: string } | undefined;
+          if (prow?.cloud_id) productId = prow.cloud_id;
+        }
+        return {
+          id: row.id,
+          transactionItemId: row.transaction_item_id,
+          voucherId,
+          productId,
+          productName: row.product_name,
+          quantity: row.quantity,
+          unitValue: row.unit_value,
+          faceValue: row.face_value,
+          issuedAt: row.issued_at,
+          expiresAt: row.expires_at,
+          status: row.status || 'issued',
+          reprintCount: row.reprint_count ?? 0,
+          lastPrintedAt: row.last_printed_at,
+        };
+      }),
+      stockMovements: (this.db
+        .prepare(
+          'SELECT * FROM stock_movements WHERE transaction_id = ? AND synced = 0',
+        )
+        .all(transactionId) as Array<Record<string, unknown>>).map((row) => {
+        let productId: string | null = (row.product_id as string) || null;
+        if (productId) {
+          const prow = this.db
+            .prepare('SELECT cloud_id FROM products WHERE id = ?')
+            .get(productId) as { cloud_id?: string } | undefined;
+          if (prow?.cloud_id) productId = prow.cloud_id;
+        }
+        return {
+          id: row.id,
+          productId,
+          delta: row.delta,
+          reason: row.reason || 'sale',
+          transactionItemId: row.transaction_item_id,
+          occurredAt: row.occurred_at,
+          note: null,
+        };
+      }),
     };
   }
 
   /** Drain pending outbox rows until empty or a transient error. Returns when done. */
   async flushOutbox(opts?: { blocking?: boolean }): Promise<{ ok: boolean; flushed: number; reason?: string }> {
-    if (!this.db) return { ok: false, flushed: 0, reason: 'db_not_ready' };
+    if (!this._dbReady()) return { ok: false, flushed: 0, reason: 'db_not_ready' };
     if (this.isFlushing && !opts?.blocking) {
       return { ok: false, flushed: 0, reason: 'already_flushing' };
     }
@@ -271,7 +336,15 @@ export class TransactionSyncService {
         const ids = rows.map((r) => r.id);
         this._markStatus(ids, 'syncing');
 
-        const batchTransactions = rows.map((r) => JSON.parse(r.payload));
+        const batchTransactions = rows.map((r) => {
+          if (r.transactionId) {
+            const fresh = this._buildTransactionPayload(r.transactionId);
+            if (fresh) return fresh;
+          }
+          const parsed = JSON.parse(r.payload) as Record<string, unknown>;
+          if (parsed.tipAmount == null) parsed.tipAmount = 0;
+          return parsed;
+        });
         const result = await this._postTransactions(batchTransactions);
 
         if (!result.ok) {
@@ -307,6 +380,9 @@ export class TransactionSyncService {
             const txId = row.transactionId!;
             if (okIds.has(txId)) {
               this.db.prepare('UPDATE transactions SET syncedAt = ? WHERE id = ?').run(now, txId);
+              this.db
+                .prepare('UPDATE stock_movements SET synced = 1 WHERE transaction_id = ?')
+                .run(txId);
               this.db.prepare('DELETE FROM tx_outbox WHERE id = ?').run(row.id);
               flushed += 1;
             }
@@ -322,6 +398,9 @@ export class TransactionSyncService {
         });
         finishTxn();
         this.nextBackoffMs = BACKOFF_MIN_MS;
+        void stockSyncService.pullStockImmediate().catch((e) => {
+          console.error('[StockSync] post-tx-flush pull failed', e);
+        });
       }
     } finally {
       this.isFlushing = false;
@@ -338,6 +417,7 @@ export class TransactionSyncService {
   async closeDayWithCloud(zPayload: Record<string, unknown>): Promise<{
     ok: boolean;
     status?: 'accepted' | 'duplicate';
+    zReportId?: string;
     error?: string;
     httpStatus?: number;
     missingIds?: string[];
@@ -353,7 +433,8 @@ export class TransactionSyncService {
     // Pre-flight 2: POST z-report.
     const r1 = await this._postZReport(zPayload);
     if (r1.ok) {
-      return { ok: true, status: r1.body?.status as 'accepted' | 'duplicate' };
+      const zReportId = r1.body?.zReportId as string | undefined;
+      return { ok: true, status: r1.body?.status as 'accepted' | 'duplicate', zReportId };
     }
     if (r1.httpStatus === 409 && Array.isArray(r1.body?.missingIds)) {
       // Try to enqueue the specific missing tx ids and flush once.
@@ -365,10 +446,33 @@ export class TransactionSyncService {
         return { ok: false, error: flush2.reason || 'flush_failed', missingIds: r1.body.missingIds };
       }
       const r2 = await this._postZReport(zPayload);
-      if (r2.ok) return { ok: true, status: r2.body?.status as 'accepted' | 'duplicate' };
+      if (r2.ok) {
+        const zReportId = r2.body?.zReportId as string | undefined;
+        return { ok: true, status: r2.body?.status as 'accepted' | 'duplicate', zReportId };
+      }
       return { ok: false, error: r2.error || 'z_report_failed', httpStatus: r2.httpStatus };
     }
     return { ok: false, error: r1.error || 'z_report_failed', httpStatus: r1.httpStatus };
+  }
+
+  postCloseDayAck(payload: {
+    requestId: string;
+    phase: 'received' | 'completed' | 'failed';
+    zReportId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const httpCfg =
+        (syncService as any)._effectiveHttpConfig?.bind(syncService)() ||
+        syncService.readCloudHttpConfigFromDb();
+      if (!httpCfg) return resolve({ ok: false, error: 'cloud_not_configured' });
+      const path = `/sync/${httpCfg.machineId}/close-day/ack`;
+      syncService.cloudJson('POST', path, payload, (err) => {
+        if (err) return resolve({ ok: false, error: err.message });
+        resolve({ ok: true });
+      });
+    });
   }
 
   private _postTransactions(transactions: unknown[]): Promise<{

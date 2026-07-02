@@ -14,9 +14,10 @@ interface CloseDayDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onClose: (closedDay: TradingDay) => void;
+  remoteRequest?: { requestId: string; initiatedBy?: string; message?: string };
 }
 
-export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogProps) {
+export function CloseDayDialog({ open, onOpenChange, onClose, remoteRequest }: CloseDayDialogProps) {
   const { t, locale } = useI18n();
   const { currentTradingDay, closeDay, isDayOpen } = useTradingDayStore();
   const { currentUser, transactions } = useTransactionStore();
@@ -42,6 +43,22 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
     }
   }, [open, currentTradingDay, closingCash, transactions]);
 
+  const handleDismiss = (nextOpen: boolean) => {
+    if (!nextOpen && remoteRequest?.requestId && window.electronAPI?.cloudCloseDayAck) {
+      void window.electronAPI.cloudCloseDayAck({
+        requestId: remoteRequest.requestId,
+        phase: 'failed',
+        errorCode: 'cancelled',
+        errorMessage: 'User dismissed close-day dialog',
+      });
+    }
+    if (!nextOpen) {
+      setClosingCash('');
+      setError(null);
+    }
+    onOpenChange(nextOpen);
+  };
+
   const handleClose = async () => {
     setError(null);
     
@@ -63,7 +80,11 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
     setIsLoading(true);
     try {
       // closeDay will fetch transactions internally, so we don't need to pass them
-      const closedDay = await closeDay(parseFloat(closingCash), currentUser.id);
+      const closedDay = await closeDay(
+        parseFloat(closingCash),
+        currentUser.id,
+        remoteRequest?.requestId,
+      );
       setClosingCash('');
       // Close this dialog first
       onOpenChange(false);
@@ -91,7 +112,7 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDismiss}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{t('tradingDay.closeDay')}</DialogTitle>
@@ -99,6 +120,17 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
             {t('tradingDay.confirmClose')}
           </DialogDescription>
         </DialogHeader>
+
+        {remoteRequest ? (
+          <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary">
+            {t('tradingDay.remoteCloseBanner', {
+              name: remoteRequest.initiatedBy || t('tradingDay.remoteCloseUnknown'),
+            })}
+            {remoteRequest.message ? (
+              <p className="mt-1 text-xs text-muted-foreground">{remoteRequest.message}</p>
+            ) : null}
+          </div>
+        ) : null}
         
         <div className="space-y-4 py-4">
           <div className="space-y-2">
@@ -163,11 +195,7 @@ export function CloseDayDialog({ open, onOpenChange, onClose }: CloseDayDialogPr
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => {
-                setClosingCash('');
-                setError(null);
-                onOpenChange(false);
-              }}
+              onClick={() => handleDismiss(false)}
               disabled={isLoading}
             >
               {t('common.cancel')}

@@ -60,6 +60,8 @@ export interface TransactionRow {
   whtDeduction: number | null;
   amountTendered: number | null; // Cash amount tendered
   changeAmount: number | null; // Change given
+  tipAmount: number | null;
+  tipPaymentMethod: string | null; // 'cash' | 'card'
   refundOfTransactionId: string | null; // When set, this row is a refund document linking to the original transaction
   paymentMethod: string | null; // 'cash' | 'card'
   nayaxMeta: string | null; // JSON
@@ -257,6 +259,24 @@ export function createSchema(db: any): void {
     db.exec(`ALTER TABLE transactions ADD COLUMN nayaxMeta TEXT`);
   } catch (_) {
     // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN tipAmount REAL`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN tipPaymentMethod TEXT`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`UPDATE transactions SET tipAmount = 0 WHERE tipAmount IS NULL`);
+  } catch (_) {
+    // Column may not exist on very old DBs
   }
 
   // Transaction items table

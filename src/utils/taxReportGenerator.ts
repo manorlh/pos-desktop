@@ -434,10 +434,7 @@ export function buildD120Record(
   linkId7: string,
   options?: { docType?: number }
 ): string {
-  const paymentAmount =
-    transaction.amountTendered != null
-      ? Number(transaction.amountTendered)
-      : Number(transaction.cart?.totalAmount ?? 0);
+  const paymentAmount = Number(transaction.cart?.totalAmount ?? 0);
   const paymentType = transaction.paymentMethod === 'card' ? 3 : 1;
   const docType = options?.docType ?? transaction.documentType;
   const docProductionDate =

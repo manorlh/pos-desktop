@@ -17,8 +17,47 @@ export interface Product {
   stockQuantity: number;
   barcode?: string;
   taxRate?: number;
+  voucherId?: string;
+  trackStock?: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type ValueDisplayMode = 'product_price' | 'fixed' | 'none';
+
+export interface Voucher {
+  id: string;
+  cloudId?: string;
+  name: string;
+  isActive: boolean;
+  title?: string;
+  subtitle?: string;
+  bodyText?: string;
+  footerText?: string;
+  validityDays?: number;
+  valueDisplayMode: ValueDisplayMode;
+  displayValue?: number;
+  printBarcode: boolean;
+  printQr: boolean;
+  language?: string;
+  updatedAt: string;
+}
+
+export interface IssuedVoucher {
+  id: string;
+  transactionId: string;
+  transactionItemId?: string;
+  voucherId?: string;
+  productId?: string;
+  productName?: string;
+  quantity: number;
+  unitValue?: number;
+  faceValue?: number;
+  issuedAt: string;
+  expiresAt?: string;
+  status: 'issued' | 'voided' | 'redeemed';
+  reprintCount: number;
+  lastPrintedAt?: string;
 }
 
 export interface Category {
@@ -104,8 +143,11 @@ export interface Transaction {
   nayaxMeta?: string;
   amountTendered?: number; // Cash amount tendered
   changeAmount?: number; // Change given
+  tipAmount?: number;
+  tipPaymentMethod?: 'cash' | 'card';
   // Refund link: when set, this transaction is a refund (credit) document for the original sale
   refundOfTransactionId?: string;
+  issuedVouchers?: IssuedVoucher[];
 }
 
 export interface User {
@@ -165,7 +207,12 @@ export interface ZReportData {
   totalTransactions: number;
   totalItems: number;
   cashSales: number;
+  cardSales?: number;
   taxCollected: number;
+  totalTips: number;
+  cashTips: number;
+  cardTips: number;
+  totalRefunds?: number;
   openingCash: number;
   expectedCash: number;
   actualCash: number;

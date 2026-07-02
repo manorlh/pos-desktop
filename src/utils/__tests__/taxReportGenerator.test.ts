@@ -601,6 +601,39 @@ describe('collectUniqueProductsForM100', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tips: excluded from מבנה אחיד taxable totals
+// ---------------------------------------------------------------------------
+
+describe('Tips excluded from tax export', () => {
+  function parseAmount15(field: string): number {
+    const negative = field.trim().startsWith('-') || field.includes('-');
+    const digits = field.replace(/\D/g, '');
+    const value = (parseInt(digits, 10) || 0) / 100;
+    return negative ? -value : value;
+  }
+
+  it('C100 total equals D120 payment (goods-only) when sale includes a tip', () => {
+    const tx = makeTransaction({
+      paymentMethod: 'cash',
+      amountTendered: 100,
+      changeAmount: 1.5,
+      tipAmount: 10,
+      tipPaymentMethod: 'cash',
+    });
+    const goodsTotal = tx.cart.totalAmount;
+    const c100 = buildC100Record(tx, '123456789', 1, '0000001');
+    const d120 = buildD120Record(tx, 1, '123456789', 2, '0000001');
+    const c100Total = parseAmount15(c100.substring(347, 362));
+    const d120Payment = parseAmount15(d120.substring(103, 118));
+
+    expect(c100Total).toBeCloseTo(goodsTotal, 2);
+    expect(d120Payment).toBeCloseTo(goodsTotal, 2);
+    expect(d120Payment).toBeCloseTo(c100Total, 2);
+    expect(tx.amountTendered!).toBeGreaterThan(goodsTotal);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildSummaryRecord
 // ---------------------------------------------------------------------------
 

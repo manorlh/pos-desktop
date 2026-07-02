@@ -16,7 +16,7 @@ interface TradingDayStore {
   isDayOpen: boolean;
   loadCurrentTradingDay: () => Promise<void>;
   openDay: (openingCash: number, userId: string) => Promise<void>;
-  closeDay: (closingCash: number, userId: string) => Promise<TradingDay>;
+  closeDay: (closingCash: number, userId: string, closeDayRequestId?: string) => Promise<TradingDay>;
   getTradingDayByDate: (date: Date) => Promise<TradingDay | null>;
   getTradingDaysByDateRange: (start: Date, end: Date) => Promise<TradingDay[]>;
 }
@@ -97,7 +97,7 @@ export const useTradingDayStore = create<TradingDayStore>((set, get) => ({
     }
   },
 
-  closeDay: async (closingCash: number, userId: string): Promise<TradingDay> => {
+  closeDay: async (closingCash: number, userId: string, closeDayRequestId?: string): Promise<TradingDay> => {
     const { currentTradingDay } = get();
     if (!currentTradingDay || currentTradingDay.status !== 'open') {
       throw new Error('No open trading day to close');
@@ -154,6 +154,9 @@ export const useTradingDayStore = create<TradingDayStore>((set, get) => ({
       whtDeduction: tx.whtDeduction,
       amountTendered: tx.amountTendered,
       changeAmount: tx.changeAmount,
+      tipAmount: tx.tipAmount,
+      tipPaymentMethod: tx.tipPaymentMethod,
+      paymentMethod: tx.paymentMethod,
     }));
 
     const { generateZReport } = await import('@/utils/zReportGenerator');
@@ -184,13 +187,25 @@ export const useTradingDayStore = create<TradingDayStore>((set, get) => ({
       totalRefunds: zReportData.totalRefunds,
       totalCashSales: zReportData.cashSales,
       totalCardSales: zReportData.cardSales,
+      totalTips: zReportData.totalTips,
+      totalCashTips: zReportData.cashTips,
+      totalCardTips: zReportData.cardTips,
       transactionsCount: transactions.length,
       transactionIds: transactions.map((t) => t.id),
       payload: zReportData as unknown as Record<string, unknown>,
+      ...(closeDayRequestId ? { closeDayRequestId } : {}),
     });
 
     if (!cloudResult.success) {
       console.error('[Z-close] cloud barrier failed:', cloudResult);
+      if (closeDayRequestId && window.electronAPI.cloudCloseDayAck) {
+        void window.electronAPI.cloudCloseDayAck({
+          requestId: closeDayRequestId,
+          phase: 'failed',
+          errorCode: 'cloud_barrier_failed',
+          errorMessage: cloudResult.error || 'unknown',
+        });
+      }
       // Keep machine-readable code so UI can translate.
       throw new Error('z-close.cloud-required:' + (cloudResult.error || 'unknown'));
     }
@@ -246,6 +261,14 @@ export const useTradingDayStore = create<TradingDayStore>((set, get) => ({
       currentTradingDay: closedDay,
       isDayOpen: false,
     });
+
+    if (closeDayRequestId && window.electronAPI.cloudCloseDayAck) {
+      void window.electronAPI.cloudCloseDayAck({
+        requestId: closeDayRequestId,
+        phase: 'completed',
+        zReportId: cloudResult.zReportId,
+      });
+    }
 
     return closedDay;
   },

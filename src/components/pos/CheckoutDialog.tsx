@@ -20,7 +20,16 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { formatCurrency } from '@/lib/utils';
 import { useI18n } from '@/i18n';
 import { buildReceiptPrintPayload } from '@/utils/receiptPrint';
+import { printReceiptForTransaction } from '@/utils/printReceipt';
+import { issueAndPrintVouchersForTransaction } from '@/utils/voucherIssue';
+import type { VoucherIssueFailure } from '@/utils/voucherIssue';
 import type { CartItem, Transaction } from '@/types';
+
+/** Accurate, source-aware print failure shown after a completed sale. */
+type CheckoutPrintError =
+  | { source: 'receipt'; detail: string }
+  | { source: 'voucher'; failure: VoucherIssueFailure }
+  | { source: 'drawer'; detail: string };
 
 interface CheckoutDialogProps {
   open: boolean;
@@ -47,13 +56,16 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   } = useTransactionStore();
   const { loadProducts, categories } = useProductStore();
   const { isDayOpen } = useTradingDayStore();
-  const { loadSettings, globalTaxRate, language } = useSettingsStore();
+  const { loadSettings, globalTaxRate, language, tipsEnabled, cashTipsEnabled, tipPresets } =
+    useSettingsStore();
   const { businessInfo } = useBusinessStore();
   const { t, locale } = useI18n();
   const [error, setError] = useState<string | null>(null);
-  const [printError, setPrintError] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<CheckoutPrintError | null>(null);
   /** Set after pending row exists; used for Nayax abort + cancel button visibility */
   const [activeCardVuid, setActiveCardVuid] = useState<string | null>(null);
+  const [tipAmount, setTipAmount] = useState(0);
+  const [customTipInput, setCustomTipInput] = useState('');
 
   const canUseCardPayment =
     typeof window !== 'undefined' &&
@@ -62,11 +74,36 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     typeof window !== 'undefined' &&
     Boolean(window.electronAPI?.nayaxAbortTransaction);
 
-  const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - cart.totalAmount);
-  const canCompleteCash = parseFloat(amountTendered || '0') >= cart.totalAmount;
-  const amountAgorot = Math.round(cart.totalAmount * 100);
+  const showTipSection =
+    tipsEnabled && (paymentMode === 'card' || cashTipsEnabled);
+  const effectiveTipAmount = showTipSection ? tipAmount : 0;
+  const grandTotal = cart.totalAmount + effectiveTipAmount;
+  const changeAmount = Math.max(0, parseFloat(amountTendered || '0') - grandTotal);
+  const canCompleteCash = parseFloat(amountTendered || '0') >= grandTotal;
+  const amountAgorot = Math.round(grandTotal * 100);
   const canCompleteCard =
     isDayOpen && amountAgorot >= 1 && cart.totalAmount > 0;
+
+  const roundMoney = (n: number) => Math.round(n * 100) / 100;
+
+  const tipExtras =
+    effectiveTipAmount > 0
+      ? { tipAmount: effectiveTipAmount, tipPaymentMethod: paymentMode as 'cash' | 'card' }
+      : {};
+
+  useEffect(() => {
+    if (!showTipSection) {
+      setTipAmount(0);
+      setCustomTipInput('');
+    }
+  }, [showTipSection]);
+
+  useEffect(() => {
+    if (!open) {
+      setTipAmount(0);
+      setCustomTipInput('');
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!canUseCardPayment && paymentMode === 'card') {
@@ -120,9 +157,9 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
   ];
 
   const printReceiptAfterSale = useCallback(
-    async (tx: Transaction): Promise<string | null> => {
+    async (tx: Transaction): Promise<{ receiptError: string | null; drawerWarning: string | null }> => {
       if (!window.electronAPI?.printReceipt) {
-        return t('receipt.printFailed');
+        return { receiptError: t('receipt.printFailed'), drawerWarning: null };
       }
       try {
         const payload = buildReceiptPrintPayload(
@@ -132,24 +169,48 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
           language,
           categories,
         );
-        const result = await window.electronAPI.printReceipt(payload);
-        if (!result.success) {
-          return result.error || t('receipt.printFailed');
-        }
-        return null;
+        return await printReceiptForTransaction(payload, tx, t);
       } catch (e: unknown) {
-        return e instanceof Error ? e.message : t('receipt.printFailed');
+        return {
+          receiptError: e instanceof Error ? e.message : t('receipt.printFailed'),
+          drawerWarning: null,
+        };
       }
     },
     [businessInfo, categories, globalTaxRate, language, t],
   );
 
+  const printVouchersAfterSale = useCallback(
+    async (tx: Transaction): Promise<VoucherIssueFailure | null> => {
+      try {
+        const { error } = await issueAndPrintVouchersForTransaction(tx, businessInfo);
+        return error;
+      } catch (e: unknown) {
+        const detail = e instanceof Error ? e.message : undefined;
+        return { code: 'print_failed', productName: '', detail };
+      }
+    },
+    [businessInfo],
+  );
+
+  const finishSaleWithPrints = useCallback(
+    async (tx: Transaction): Promise<CheckoutPrintError | null> => {
+      const { receiptError, drawerWarning } = await printReceiptAfterSale(tx);
+      const voucherFailure = await printVouchersAfterSale(tx);
+      if (receiptError) return { source: 'receipt', detail: receiptError };
+      if (drawerWarning) return { source: 'drawer', detail: drawerWarning };
+      if (voucherFailure) return { source: 'voucher', failure: voucherFailure };
+      return null;
+    },
+    [printReceiptAfterSale, printVouchersAfterSale],
+  );
+
   const finishSuccessfulCheckout = useCallback(
-    (receiptPrintError: string | null) => {
-      setPrintError(receiptPrintError);
+    (printFailure: CheckoutPrintError | null) => {
+      setPrintError(printFailure);
       setIsComplete(true);
 
-      const closeDelayMs = receiptPrintError ? 5000 : 2000;
+      const closeDelayMs = printFailure ? 5000 : 2000;
       setTimeout(() => {
         clearCart();
         setIsComplete(false);
@@ -158,6 +219,8 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         setPrintError(null);
         setPaymentMode('cash');
         setLastChangeAmount(0);
+        setTipAmount(0);
+        setCustomTipInput('');
         onOpenChange(false);
       }, closeDelayMs);
     },
@@ -183,12 +246,13 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
         mode: 'cash',
         amountTendered: amountTenderedNum,
         changeAmount: changeAmount,
+        ...tipExtras,
       });
 
       await loadProducts();
 
-      const receiptPrintError = await printReceiptAfterSale(tx);
-      finishSuccessfulCheckout(receiptPrintError);
+      const printError = await finishSaleWithPrints(tx);
+      finishSuccessfulCheckout(printError);
     } catch (error: unknown) {
       console.error('Transaction failed:', error);
       const msg = error instanceof Error ? error.message : t('tradingDay.cannotProcessTransaction');
@@ -232,7 +296,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
     let approvalSucceeded = false;
 
     try {
-      const pending = await createPendingCardTransaction(cart);
+      const pending = await createPendingCardTransaction(cart, undefined, tipExtras);
       pendingId = pending.id;
       pendingCardTransactionIdRef.current = pending.id;
       setActiveCardVuid(pending.id);
@@ -273,8 +337,8 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
 
       await loadProducts();
 
-      const receiptPrintError = await printReceiptAfterSale(tx);
-      finishSuccessfulCheckout(receiptPrintError);
+      const printError = await finishSaleWithPrints(tx);
+      finishSuccessfulCheckout(printError);
     } catch (error: unknown) {
       console.error('Card transaction failed:', error);
       if (pendingId && !approvalSucceeded) {
@@ -334,15 +398,53 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
               )}
             </DialogDescription>
 
-            {printError && (
+            {printError && printError.source === 'receipt' && (
               <Alert variant="destructive" className="mt-4 text-right">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>{t('receipt.printFailedTitle')}</AlertTitle>
                 <AlertDescription>
                   <p>{t('receipt.printFailed')}</p>
                   <p className="text-xs mt-1 opacity-90">
-                    {t('receipt.printFailedDetail', { reason: printError })}
+                    {t('receipt.printFailedDetail', { reason: printError.detail })}
                   </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {printError && printError.source === 'voucher' && (
+              <Alert variant="destructive" className="mt-4 text-right">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>{t('voucher.issueFailedTitle')}</AlertTitle>
+                <AlertDescription>
+                  {printError.failure.code === 'template_missing' ? (
+                    <p>
+                      {t('voucher.templateMissing', {
+                        product: printError.failure.productName,
+                      })}
+                    </p>
+                  ) : (
+                    <>
+                      <p>{t('voucher.printFailed')}</p>
+                      {printError.failure.detail && (
+                        <p className="text-xs mt-1 opacity-90">
+                          {t('receipt.printFailedDetail', {
+                            reason: printError.failure.detail,
+                          })}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {printError && printError.source === 'drawer' && (
+              <Alert variant="destructive" className="mt-4 text-right">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>{t('printer.drawerWarningTitle')}</AlertTitle>
+                <AlertDescription>
+                  <p>{t('printer.drawerWarningBody')}</p>
+                  <p className="text-xs mt-1 opacity-90">{printError.detail}</p>
                 </AlertDescription>
               </Alert>
             )}
@@ -395,6 +497,18 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                   <span className="text-sm font-bold">{t('pos.total')}:</span>
                   <span className="text-base lg:text-lg font-bold text-primary">{formatCurrency(cart.totalAmount, locale)}</span>
                 </div>
+                {showTipSection && effectiveTipAmount > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">{t('checkout.tip')}:</span>
+                    <span>{formatCurrency(effectiveTipAmount, locale)}</span>
+                  </div>
+                )}
+                {showTipSection && effectiveTipAmount > 0 && (
+                  <div className="flex justify-between items-center pt-1 border-t">
+                    <span className="text-sm font-bold">{t('checkout.grandTotal')}:</span>
+                    <span className="text-base font-bold">{formatCurrency(grandTotal, locale)}</span>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -437,6 +551,58 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                     <CreditCard className="mr-1.5 h-4 w-4 shrink-0" />
                     {t('checkout.card')}
                   </Button>
+                </div>
+              )}
+
+              {showTipSection && (
+                <div className="flex-shrink-0 space-y-1.5 border rounded-md p-2 bg-muted/30">
+                  <div className="text-xs font-medium">{t('checkout.tip')}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {tipPresets.map((pct) => (
+                      <Button
+                        key={pct}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs px-2"
+                        onClick={() => {
+                          setTipAmount(roundMoney((cart.totalAmount * pct) / 100));
+                          setCustomTipInput('');
+                        }}
+                      >
+                        {pct}%
+                      </Button>
+                    ))}
+                    <Button
+                      type="button"
+                      variant={effectiveTipAmount === 0 ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs px-2"
+                      onClick={() => {
+                        setTipAmount(0);
+                        setCustomTipInput('');
+                      }}
+                    >
+                      {t('checkout.noTip')}
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground shrink-0">{t('checkout.customTip')}</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={customTipInput}
+                      onChange={(e) => {
+                        setCustomTipInput(e.target.value);
+                        const n = parseFloat(e.target.value);
+                        setTipAmount(Number.isFinite(n) && n > 0 ? roundMoney(n) : 0);
+                      }}
+                      placeholder="0.00"
+                      className="h-7 text-xs"
+                      showVirtualKeyboard={false}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -486,7 +652,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
 
                   {(changeAmount > 0 ||
                     (parseFloat(amountTendered || '0') > 0 &&
-                      parseFloat(amountTendered || '0') < cart.totalAmount)) && (
+                      parseFloat(amountTendered || '0') < grandTotal)) && (
                     <div className="flex-shrink-0">
                       {changeAmount > 0 ? (
                         <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-green-500/10 rounded-md border border-green-500/20">
@@ -504,7 +670,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
                           </span>
                           <span className="text-xs font-bold text-destructive shrink-0">
                             {formatCurrency(
-                              cart.totalAmount - parseFloat(amountTendered || '0'),
+                              grandTotal - parseFloat(amountTendered || '0'),
                               locale,
                             )}{' '}
                             {t('checkout.more')}
@@ -516,7 +682,7 @@ export function CheckoutDialog({ open, onOpenChange }: CheckoutDialogProps) {
 
                   {showKeyboard && (
                     <div className="flex-1 min-h-0 flex flex-col">
-                      <div className="grid grid-rows-4 flex-1 min-h-0 gap-1 bg-muted/50 p-1.5 rounded-lg">
+                      <div dir="ltr" className="grid grid-rows-4 flex-1 min-h-0 gap-1 bg-muted/50 p-1.5 rounded-lg">
                         {numericKeys.map((row, rowIndex) => (
                           <div key={rowIndex} className="grid grid-cols-3 gap-1 min-h-0">
                             {row.map((key) => (

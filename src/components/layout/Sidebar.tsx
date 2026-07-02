@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   ShoppingCart, 
   Receipt, 
@@ -8,6 +8,7 @@ import {
   Store,
   TestTube,
   FileText,
+  FileBarChart,
   Sun,
   Moon,
   X,
@@ -21,6 +22,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { OpenDayDialog } from '../trading-day/OpenDayDialog';
 import { CloseDayDialog } from '../trading-day/CloseDayDialog';
 import { ZReportDialog } from '../trading-day/ZReportDialog';
+import { XReportDialog } from '../trading-day/XReportDialog';
 import type { ViewType } from '@/types/layout';
 import type { TradingDay } from '@/types/index';
 
@@ -39,7 +41,35 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
   const [openDayDialogOpen, setOpenDayDialogOpen] = useState(false);
   const [closeDayDialogOpen, setCloseDayDialogOpen] = useState(false);
   const [zReportDialogOpen, setZReportDialogOpen] = useState(false);
+  const [xReportDialogOpen, setXReportDialogOpen] = useState(false);
   const [closedTradingDay, setClosedTradingDay] = useState<TradingDay | null>(null);
+  const [remoteCloseRequest, setRemoteCloseRequest] = useState<{
+    requestId: string;
+    initiatedBy?: string;
+    message?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onCloseDayRequested) return;
+    return window.electronAPI.onCloseDayRequested((payload) => {
+      if (!payload.requestId) return;
+      if (!useTradingDayStore.getState().isDayOpen) {
+        void window.electronAPI?.cloudCloseDayAck?.({
+          requestId: payload.requestId,
+          phase: 'failed',
+          errorCode: 'no_day_open',
+          errorMessage: 'No open trading day on POS',
+        });
+        return;
+      }
+      setRemoteCloseRequest({
+        requestId: payload.requestId,
+        initiatedBy: payload.initiatedBy,
+        message: payload.message,
+      });
+      setCloseDayDialogOpen(true);
+    });
+  }, []);
 
   const cashierName = posUser
     ? [posUser.firstName, posUser.lastName].filter(Boolean).join(' ').trim() || posUser.username
@@ -56,11 +86,17 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
   ];
 
   const handleTradingDayClick = () => {
+    setRemoteCloseRequest(null);
     if (isDayOpen) {
       setCloseDayDialogOpen(true);
     } else {
       setOpenDayDialogOpen(true);
     }
+  };
+
+  const handleCloseDayDialogChange = (open: boolean) => {
+    setCloseDayDialogOpen(open);
+    if (!open) setRemoteCloseRequest(null);
   };
 
   const handleCloseDay = (closedDay: TradingDay) => {
@@ -121,7 +157,19 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
               </>
             )}
           </Button>
-          
+
+          {/* X-Report — mid-shift snapshot, only while a day is open */}
+          {isDayOpen && (
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => setXReportDialogOpen(true)}
+            >
+              <FileBarChart className="h-4 w-4 shrink-0" />
+              <span>{t('tradingDay.xReport')}</span>
+            </Button>
+          )}
+
           {navigation.map((item) => (
             <Button
               key={item.id}
@@ -145,13 +193,18 @@ export function Sidebar({ currentView, onViewChange, isOpen = true, onClose }: S
       />
       <CloseDayDialog 
         open={closeDayDialogOpen} 
-        onOpenChange={setCloseDayDialogOpen}
+        onOpenChange={handleCloseDayDialogChange}
         onClose={handleCloseDay}
+        remoteRequest={remoteCloseRequest ?? undefined}
       />
       <ZReportDialog 
         open={zReportDialogOpen} 
         onOpenChange={setZReportDialogOpen}
         tradingDay={closedTradingDay}
+      />
+      <XReportDialog
+        open={xReportDialogOpen}
+        onOpenChange={setXReportDialogOpen}
       />
       
       <div className="p-4 border-t border-border space-y-2">

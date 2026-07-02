@@ -125,6 +125,22 @@ export function ZReportDialog({ open, onOpenChange, tradingDay }: ZReportDialogP
                 <span>{t('tradingDay.taxCollected')}:</span>
                 <span className="font-semibold">{formatCurrency(zReport.taxCollected, locale)}</span>
               </div>
+              {zReport.totalTips > 0 && (
+                <>
+                  <div className="flex justify-between">
+                    <span>{t('tradingDay.totalTips')}:</span>
+                    <span className="font-semibold">{formatCurrency(zReport.totalTips, locale)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>{t('tradingDay.cashTips')}:</span>
+                    <span>{formatCurrency(zReport.cashTips, locale)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>{t('tradingDay.cardTips')}:</span>
+                    <span>{formatCurrency(zReport.cardTips, locale)}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
