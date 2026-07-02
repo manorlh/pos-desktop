@@ -116,7 +116,7 @@ export function OpenDrawerDialog({ open, onOpenChange }: OpenDrawerDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" dir={language === 'he' ? 'rtl' : 'ltr'}>
         <DialogHeader>
           <DialogTitle>{t('printer.openDrawerTitle')}</DialogTitle>
           <DialogDescription>{t('printer.openDrawerDesc')}</DialogDescription>

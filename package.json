@@ -66,7 +66,6 @@
     "typescript": "^5.2.2",
     "vite": "^5.0.0",
     "vite-plugin-electron": "^1.1.0",
-    "vite-plugin-electron-renderer": "^1.0.0",
     "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },
