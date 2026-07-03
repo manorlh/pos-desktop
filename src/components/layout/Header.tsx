@@ -1,4 +1,4 @@
-import { Clock, Menu, Wallet } from 'lucide-react';
+import { Clock, Menu, Power, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatDate } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -25,6 +25,23 @@ export function Header({ onMenuClick }: HeaderProps) {
 
     return () => clearInterval(timer);
   }, []);
+
+  const handleQuit = async () => {
+    const api = window.electronAPI;
+    if (!api?.quitApp) return;
+    if (api.showMessageBox) {
+      const confirm = await api.showMessageBox({
+        type: 'question',
+        title: t('printer.quitAppTitle'),
+        message: t('printer.quitAppMessage'),
+        buttons: [t('common.cancel'), t('printer.quitAppConfirm')],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (confirm.response !== 1) return;
+    }
+    await api.quitApp();
+  };
 
   return (
     <header className="h-14 till:h-14 xl:h-16 border-b border-border bg-card px-3 till:px-3 xl:px-6 flex items-center justify-between">
@@ -61,6 +78,26 @@ export function Header({ onMenuClick }: HeaderProps) {
           onClick={() => setDrawerOpen(true)}
         >
           <Wallet className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="hidden sm:flex gap-2"
+          onClick={handleQuit}
+        >
+          <Power className="h-4 w-4" />
+          {t('printer.quitApp')}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="sm:hidden"
+          aria-label={t('printer.quitApp')}
+          onClick={handleQuit}
+        >
+          <Power className="h-4 w-4" />
         </Button>
         <AppVersionBadge />
         <div className="flex items-center gap-2">

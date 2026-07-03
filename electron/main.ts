@@ -1995,6 +1995,12 @@ ipcMain.handle('app-restart', () => {
   return { success: true };
 });
 
+ipcMain.handle('quit-app', () => {
+  // app.quit() triggers 'before-quit', which flushes and closes the database.
+  app.quit();
+  return { success: true };
+});
+
 ipcMain.handle('get-heebo-font-css', () => {
   if (!app.isPackaged) return '';
   const resourcesPath = getPackagedResourcesPath(
@@ -2078,37 +2084,34 @@ ipcMain.handle('print-test', async (event, printerName) => {
   try {
     console.log('Print test requested for printer:', printerName);
     
-    // Create a simple HTML content for testing
-    const testContent = `
+    // 80mm thermal roll layout (matches real receipts) so the test content
+    // fits within the printable width instead of overflowing an A4 page.
+    const testContent = `<!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8" />
           <style>
+            @page { size: 80mm auto; margin: 2mm; }
             @media print {
-              body { 
-                font-family: Arial, sans-serif; 
-                padding: 10px; 
-                margin: 0;
-                font-size: 12pt;
-              }
-              .test-content {
-                border: 2px solid #000;
-                padding: 15px;
-                margin: 0;
-                text-align: center;
-              }
-              h2 { margin-top: 0; }
+              body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
-            body { 
-              font-family: Arial, sans-serif; 
-              padding: 20px; 
+            * { box-sizing: border-box; }
+            body {
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 12pt;
+              margin: 0 auto;
+              padding: 3mm;
+              max-width: 72mm;
+              width: 100%;
               text-align: center;
             }
             .test-content {
-              border: 2px solid #333;
-              padding: 20px;
-              margin: 20px auto;
-              max-width: 300px;
+              border: 2px solid #000;
+              padding: 8px;
+              margin: 0;
             }
+            h2 { margin: 0 0 6px; font-size: 14pt; }
+            p { margin: 4px 0; }
           </style>
         </head>
         <body>
@@ -2124,64 +2127,54 @@ ipcMain.handle('print-test', async (event, printerName) => {
       </html>
     `;
 
-    // Create a hidden window for printing
-    const printWindow = new BrowserWindow({
-      show: false,
-      width: 800,
-      height: 600,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true
-      }
-    });
-
-    console.log('Loading content into print window...');
-    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(testContent)}`);
-    
-    // Wait a moment for content to load
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const printOptions = {
-      silent: true,  // Changed to true to avoid print dialog
-      printBackground: true,
-      color: false,
-      margin: {
-        marginType: 'minimum'
-      },
-      landscape: false,
-      pagesPerSheet: 1,
-      collate: false,
-      copies: 1
-    };
-
-    if (printerName && printerName !== 'default') {
-      printOptions.deviceName = printerName;
-      console.log('Using specific printer:', printerName);
-    } else {
-      console.log('Using default printer');
-    }
-
-    console.log('Sending to printer with options:', printOptions);
-    
-    // Try to print
-    return new Promise((resolve) => {
-      printWindow.webContents.print(printOptions, (success, failureReason) => {
-        console.log('Print result - Success:', success, 'Reason:', failureReason);
-        printWindow.close();
-        
-        if (success) {
-          resolve({ success: true, printed: true });
-        } else {
-          resolve({ success: false, error: failureReason || 'Print failed' });
-        }
-      });
-    });
+    const targetPrinter =
+      printerName && printerName !== 'default' ? printerName : undefined;
+    console.log('Sending test print to printer:', targetPrinter || '(default)');
+    return await printHtmlToPrinter(testContent, targetPrinter);
     
   } catch (error) {
     console.error('Error printing:', error);
     return { success: false, error: error.message };
   }
 });
+
+/**
+ * Wait until the print document is actually renderable (images + fonts loaded,
+ * layout committed via two rAFs) and return the rendered content height in CSS
+ * pixels. Falls back to a fixed delay if evaluation fails. Prevents the blank
+ * "empty paper" prints seen on Electron 36+ when print() runs before paint.
+ */
+async function waitForPrintReady(printWindow: BrowserWindow): Promise<number> {
+  try {
+    const height = await printWindow.webContents.executeJavaScript(`
+      (async () => {
+        await Promise.all([
+          Promise.all(
+            Array.from(document.images).map((img) =>
+              img.complete
+                ? Promise.resolve()
+                : new Promise((r) => { img.onload = img.onerror = r; }),
+            ),
+          ),
+          document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve(),
+        ]);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const b = document.body;
+        const d = document.documentElement;
+        return Math.max(
+          b ? b.scrollHeight : 0,
+          b ? b.offsetHeight : 0,
+          d ? d.scrollHeight : 0,
+          d ? d.offsetHeight : 0,
+        );
+      })()
+    `);
+    return typeof height === 'number' && height > 0 ? height : 0;
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return 0;
+  }
+}
 
 /** Print HTML content to a named printer (silent). Omits deviceName when printerName is empty. */
 async function printHtmlToPrinter(
@@ -2211,17 +2204,32 @@ async function printHtmlToPrinter(
 
   try {
     await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Electron 36 prints blank paper when the page isn't fully laid out/painted
+    // and when no explicit pageSize is supplied (the print job ends up with an
+    // empty content/page size). Wait for fonts + images, then measure the
+    // rendered content so we can pass a concrete pageSize below.
+    const contentHeightPx = await waitForPrintReady(printWindow);
+
+    // 80mm thermal roll, printable width ~72mm. pageSize is in microns.
+    const MICRONS_PER_MM = 1000;
+    const MICRONS_PER_PX = 25400 / 96; // 1px = 1/96in, 1in = 25400µm
+    const pageWidthMicrons = Math.round(80 * MICRONS_PER_MM);
+    const pageHeightMicrons = Math.max(
+      Math.round((contentHeightPx || 0) * MICRONS_PER_PX),
+      Math.round(40 * MICRONS_PER_MM),
+    );
 
     const printOptions: Record<string, unknown> = {
       silent: true,
       printBackground: true,
       color: false,
-      margin: { marginType: 'minimum' },
+      margin: { marginType: 'none' },
       landscape: false,
       pagesPerSheet: 1,
       collate: false,
       copies: 1,
+      pageSize: { width: pageWidthMicrons, height: pageHeightMicrons },
     };
 
     if (printerName && printerName.trim()) {
@@ -2234,7 +2242,14 @@ async function printHtmlToPrinter(
 
     return await new Promise((resolve) => {
       printWindow.webContents.print(printOptions, (success, failureReason) => {
-        printWindow.close();
+        // Give the spooler time to receive the job before tearing down the window.
+        setTimeout(() => {
+          try {
+            printWindow.close();
+          } catch {
+            /* ignore */
+          }
+        }, 1000);
         if (success) {
           resolve({ success: true, printed: true });
         } else {
@@ -2771,13 +2786,22 @@ ipcMain.handle('print-report-summary', async (event, summary) => {
     });
 
     await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(summaryContent)}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await waitForPrintReady(printWindow);
 
     return new Promise((resolve) => {
-      printWindow.webContents.print({ silent: true }, (success) => {
-        printWindow.close();
-        resolve({ success, printed: success });
-      });
+      printWindow.webContents.print(
+        { silent: true, printBackground: true, pageSize: 'A4' },
+        (success) => {
+          setTimeout(() => {
+            try {
+              printWindow.close();
+            } catch {
+              /* ignore */
+            }
+          }, 1000);
+          resolve({ success, printed: success });
+        },
+      );
     });
   } catch (error: any) {
     return { success: false, error: error.message };

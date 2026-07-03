@@ -575,6 +575,10 @@ export const en = {
   },
 
   printer: {
+    quitApp: 'Exit',
+    quitAppTitle: 'Exit application',
+    quitAppMessage: 'Are you sure you want to close the POS application?',
+    quitAppConfirm: 'Exit',
     openDrawer: 'Open drawer',
     openDrawerTitle: 'Open cash drawer',
     openDrawerDesc: 'Enter your cashier PIN to open the cash drawer.',

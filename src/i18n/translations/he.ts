@@ -571,6 +571,10 @@ export const he = {
   },
 
   printer: {
+    quitApp: 'יציאה',
+    quitAppTitle: 'יציאה מהתוכנה',
+    quitAppMessage: 'האם אתה בטוח שברצונך לסגור את תוכנת הקופה?',
+    quitAppConfirm: 'יציאה',
     openDrawer: 'פתח מגירה',
     openDrawerTitle: 'פתיחת מגירת מזומן',
     openDrawerDesc: 'הזן את קוד ה-PIN של הקופאי כדי לפתוח את מגירת המזומן.',

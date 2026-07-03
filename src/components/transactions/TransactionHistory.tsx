@@ -142,7 +142,13 @@ export function TransactionHistory() {
           originalDocNumber: options?.originalDocNumber,
         },
       );
-      const { receiptError, drawerWarning } = await printReceiptForTransaction(payload, transaction, t);
+      const { receiptError, drawerWarning } = await printReceiptForTransaction(
+        payload,
+        transaction,
+        t,
+        undefined,
+        { forceReceiptPrinter: true },
+      );
       if (receiptError) {
         setPrintMessage(receiptError);
       } else if (drawerWarning) {

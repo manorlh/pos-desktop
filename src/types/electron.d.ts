@@ -110,6 +110,7 @@ interface IntegrationLogRow {
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   appRestart: () => Promise<{ success: boolean }>;
+  quitApp: () => Promise<{ success: boolean }>;
   getHeeboFontCss: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
   
