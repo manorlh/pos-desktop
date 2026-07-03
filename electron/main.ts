@@ -891,10 +891,17 @@ function readMqttTenantIdMain(db: any): string | null {
   );
 }
 
-function persistMachineContextMain(
-  db: any,
-  ctx: { tenantId: string | null; shopId: string | null },
-): void {
+interface MachineMeContext {
+  tenantId: string | null;
+  shopId: string | null;
+  mqttHost?: string | null;
+  mqttPort?: number | null;
+  mqttTls?: boolean | null;
+  mqttUsername?: string | null;
+  mqttPassword?: string | null;
+}
+
+function persistMachineContextMain(db: any, ctx: MachineMeContext): void {
   if (!isSqliteOpen(db)) return;
   const put = (k: string, v: string) =>
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, v);
@@ -905,17 +912,36 @@ function persistMachineContextMain(
   if (ctx.shopId) {
     put('cloud_shop_id', ctx.shopId);
   }
+  // Refresh broker connection details so machines paired before these fields
+  // existed (or after a broker/credential change) recover without re-pairing.
+  if (ctx.mqttHost) put('mqtt_cloud_host', ctx.mqttHost);
+  if (ctx.mqttPort != null) put('mqtt_cloud_port', String(ctx.mqttPort));
+  if (ctx.mqttTls != null) put('mqtt_cloud_tls', ctx.mqttTls ? '1' : '0');
+  if (ctx.mqttUsername) put('mqtt_cloud_username', ctx.mqttUsername);
+  if (ctx.mqttPassword) put('mqtt_cloud_password', ctx.mqttPassword);
 }
 
-function parseMachineMeResponse(data: unknown): { tenantId: string | null; shopId: string | null } {
-  const d = (data ?? {}) as Record<string, string | null | undefined>;
+function parseMachineMeResponse(data: unknown): MachineMeContext {
+  const d = (data ?? {}) as Record<string, unknown>;
   const tenantId = d.tenantId
     ? String(d.tenantId)
     : d.merchantId
       ? String(d.merchantId)
       : null;
   const shopId = d.shopId ? String(d.shopId) : null;
-  return { tenantId, shopId };
+  let mqttHost: string | null = null;
+  let mqttPort: number | null = null;
+  const brokerUrl = d.mqttBrokerUrl ? String(d.mqttBrokerUrl) : '';
+  if (brokerUrl) {
+    const cleaned = brokerUrl.replace(/^mqtts?:\/\//, '');
+    const [h, p] = cleaned.split(':');
+    if (h) mqttHost = h;
+    if (p && Number.isFinite(Number(p))) mqttPort = Number(p);
+  }
+  const mqttTls = typeof d.mqttTls === 'boolean' ? (d.mqttTls as boolean) : null;
+  const mqttUsername = d.mqttUsername ? String(d.mqttUsername) : null;
+  const mqttPassword = d.mqttPassword ? String(d.mqttPassword) : null;
+  return { tenantId, shopId, mqttHost, mqttPort, mqttTls, mqttUsername, mqttPassword };
 }
 
 function _doConnectMqttFromSettings(db: any): boolean {
@@ -989,15 +1015,13 @@ function backfillTenantIdFromCloudOnce(db: any): void {
       return;
     }
     const ctx = parseMachineMeResponse(data);
-    if (ctx.tenantId || ctx.shopId) {
-      try {
-        if (isSqliteOpen(db)) {
-          persistMachineContextMain(db, ctx);
-          cloudTenantMissingLogged = false;
-        }
-      } catch (e) {
-        console.warn('[Cloud] failed to persist tenant backfill:', e);
+    try {
+      if (isSqliteOpen(db)) {
+        persistMachineContextMain(db, ctx);
+        if (ctx.tenantId) cloudTenantMissingLogged = false;
       }
+    } catch (e) {
+      console.warn('[Cloud] failed to persist tenant backfill:', e);
     }
     const tenantId = readMqttTenantIdMain(db);
     if (tenantId) {
@@ -1029,7 +1053,44 @@ function tryReconnectCloudMqttFromDb(db: any): void {
     return;
   }
 
+  // Machines paired before broker auth/TLS were sent will have stale or missing
+  // MQTT credentials. Refresh them from /machines/me before connecting so they
+  // recover without a full re-pair.
+  const hasBrokerCreds =
+    !!readSettingMain(db, 'mqtt_cloud_username') && readSettingMain(db, 'mqtt_cloud_tls') != null;
+  if (!hasBrokerCreds) {
+    refreshBrokerDetailsThenConnect(db);
+    return;
+  }
+
   _doConnectMqttFromSettings(db);
+}
+
+/**
+ * One-shot GET /machines/me to refresh broker host/port/TLS/credentials, then
+ * connect. Falls back to connecting from stored settings if the request fails
+ * (e.g. offline), so a transient network error never blocks reconnection.
+ */
+function refreshBrokerDetailsThenConnect(db: any): void {
+  try {
+    syncService.init(db);
+  } catch (e) {
+    console.warn('[Cloud] sync init before broker refresh failed:', e);
+    _doConnectMqttFromSettings(db);
+    return;
+  }
+  syncService.cloudJson('GET', '/machines/me', null, (err, _status, data) => {
+    if (!err && isSqliteOpen(db)) {
+      try {
+        persistMachineContextMain(db, parseMachineMeResponse(data));
+      } catch (e) {
+        console.warn('[Cloud] failed to persist broker refresh:', e);
+      }
+    } else if (err) {
+      console.warn('[Cloud] broker refresh failed, using stored settings:', err.message);
+    }
+    _doConnectMqttFromSettings(db);
+  });
 }
 
 function productToCloudPostPayload(product: any): Record<string, unknown> {
