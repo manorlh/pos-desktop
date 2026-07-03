@@ -263,10 +263,11 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
 <head>
   <meta charset="utf-8" />
   <style>
-    /* 80mm roll — printable ~72mm; Font A body ≈ 12pt @ 203 DPI */
-    @page { size: 80mm auto; margin: 2mm; }
+    /* 80mm roll — printable ~72mm; page sized to the printable width so the
+       right edge is never clipped. Font A body ≈ 12pt @ 203 DPI */
+    @page { size: 72mm auto; margin: 0; }
     @media print {
-      body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -274,9 +275,8 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
       font-size: 12pt;
       line-height: 1.4;
       color: #000;
-      margin: 0 auto;
+      margin: 0;
       padding: 3mm;
-      max-width: 72mm;
       width: 100%;
     }
 

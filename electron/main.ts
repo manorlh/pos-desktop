@@ -2091,7 +2091,7 @@ ipcMain.handle('print-test', async (event, printerName) => {
         <head>
           <meta charset="utf-8" />
           <style>
-            @page { size: 80mm auto; margin: 2mm; }
+            @page { size: ${THERMAL_PRINTABLE_WIDTH_MM}mm auto; margin: 0; }
             @media print {
               body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
@@ -2099,9 +2099,8 @@ ipcMain.handle('print-test', async (event, printerName) => {
             body {
               font-family: Arial, Helvetica, sans-serif;
               font-size: 12pt;
-              margin: 0 auto;
+              margin: 0;
               padding: 3mm;
-              max-width: 72mm;
               width: 100%;
               text-align: center;
             }
@@ -2137,6 +2136,13 @@ ipcMain.handle('print-test', async (event, printerName) => {
     return { success: false, error: error.message };
   }
 });
+
+/**
+ * Printable width for an 80mm thermal roll. The paper is 80mm but the head can
+ * only print ~72mm; using this as the page width (instead of 80mm) prevents the
+ * right edge of receipts/test prints from being clipped.
+ */
+const THERMAL_PRINTABLE_WIDTH_MM = 72;
 
 /**
  * Wait until the print document is actually renderable (images + fonts loaded,
@@ -2211,10 +2217,14 @@ async function printHtmlToPrinter(
     // rendered content so we can pass a concrete pageSize below.
     const contentHeightPx = await waitForPrintReady(printWindow);
 
-    // 80mm thermal roll, printable width ~72mm. pageSize is in microns.
+    // A thermal head on an 80mm roll can only print ~72mm wide; edge-to-edge
+    // printing is physically impossible, so the page width must be the PRINTABLE
+    // width, not the paper width. Sizing the page to 80mm pushes the right side
+    // of the content outside the printable region and it gets clipped. Keep this
+    // in sync with THERMAL_PRINTABLE_WIDTH_MM used by the HTML templates.
     const MICRONS_PER_MM = 1000;
     const MICRONS_PER_PX = 25400 / 96; // 1px = 1/96in, 1in = 25400µm
-    const pageWidthMicrons = Math.round(80 * MICRONS_PER_MM);
+    const pageWidthMicrons = Math.round(THERMAL_PRINTABLE_WIDTH_MM * MICRONS_PER_MM);
     const pageHeightMicrons = Math.max(
       Math.round((contentHeightPx || 0) * MICRONS_PER_PX),
       Math.round(40 * MICRONS_PER_MM),
