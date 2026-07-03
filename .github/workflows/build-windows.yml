@@ -9,6 +9,11 @@ on:
       - main
       - master
 
+# Required so electron-builder can create the GitHub Release when a v* tag is
+# pushed (default GITHUB_TOKEN is read-only → 403 "Resource not accessible").
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
