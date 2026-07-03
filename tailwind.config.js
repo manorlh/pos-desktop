@@ -17,7 +17,19 @@ module.exports = {
     },
     extend: {
       fontFamily: {
-        sans: ['Heebo', 'system-ui', 'sans-serif'],
+        // Native system font stack. On Windows this resolves to Segoe UI, which
+        // is properly hinted (crisp under ClearType/DirectWrite) and has full
+        // Hebrew coverage — unlike the unhinted Heebo web font, which looked
+        // blurry on Windows. Heebo is still used for printed receipts/vouchers.
+        sans: [
+          '"Segoe UI"',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Roboto',
+          'Arial',
+          'sans-serif',
+        ],
       },
       screens: {
         /** Viewports up to ~800px tall (e.g. 1024×768 POS till). */
