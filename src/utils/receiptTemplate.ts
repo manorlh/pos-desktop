@@ -263,9 +263,11 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
 <head>
   <meta charset="utf-8" />
   <style>
-    /* 80mm roll — printable ~72mm; page sized to the printable width so the
-       right edge is never clipped. Font A body ≈ 12pt @ 203 DPI */
-    @page { size: 72mm auto; margin: 0; }
+    /* 80mm roll — printable ~72mm. Page = full paper width with symmetric 4mm
+       padding so margins are even and text stays inside the printable area.
+       Keep in sync with THERMAL_PAPER_WIDTH_MM / THERMAL_SIDE_PADDING_MM in
+       electron/main.ts. Font A body ≈ 12pt @ 203 DPI */
+    @page { size: 80mm auto; margin: 0; }
     @media print {
       body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -276,7 +278,7 @@ export function buildReceiptHtml(payload: ReceiptPrintPayload): string {
       line-height: 1.4;
       color: #000;
       margin: 0;
-      padding: 3mm;
+      padding: 4mm;
       width: 100%;
     }
 

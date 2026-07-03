@@ -140,7 +140,7 @@ export function OpenDrawerDialog({ open, onOpenChange }: OpenDrawerDialogProps) 
           ))}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto">
+        <div dir="ltr" className="grid grid-cols-3 gap-2 max-w-[15rem] mx-auto">
           {KEYS.map((k, idx) => {
             if (typeof k === 'string') {
               return (
@@ -148,7 +148,7 @@ export function OpenDrawerDialog({ open, onOpenChange }: OpenDrawerDialogProps) 
                   key={idx}
                   type="button"
                   variant="outline"
-                  className="h-12 text-lg"
+                  className="h-14 text-xl font-semibold"
                   disabled={busy}
                   onClick={() => onKey(k)}
                 >
@@ -162,7 +162,7 @@ export function OpenDrawerDialog({ open, onOpenChange }: OpenDrawerDialogProps) 
                   key={idx}
                   type="button"
                   variant="outline"
-                  className="h-12"
+                  className="h-14 text-sm font-medium"
                   disabled={busy}
                   onClick={() => onKey(k)}
                 >
@@ -175,17 +175,18 @@ export function OpenDrawerDialog({ open, onOpenChange }: OpenDrawerDialogProps) 
                 key={idx}
                 type="button"
                 variant="outline"
-                className="h-12"
+                className="h-14 text-xl"
                 disabled={busy}
+                aria-label={t('common.back')}
                 onClick={() => onKey(k)}
               >
-                ←
+                ⌫
               </Button>
             );
           })}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t('common.cancel')}
           </Button>
