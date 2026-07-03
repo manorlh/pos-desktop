@@ -1053,17 +1053,9 @@ function tryReconnectCloudMqttFromDb(db: any): void {
     return;
   }
 
-  // Machines paired before broker auth/TLS were sent will have stale or missing
-  // MQTT credentials. Refresh them from /machines/me before connecting so they
-  // recover without a full re-pair.
-  const hasBrokerCreds =
-    !!readSettingMain(db, 'mqtt_cloud_username') && readSettingMain(db, 'mqtt_cloud_tls') != null;
-  if (!hasBrokerCreds) {
-    refreshBrokerDetailsThenConnect(db);
-    return;
-  }
-
-  _doConnectMqttFromSettings(db);
+  // Always refresh broker endpoint + credentials from /machines/me before
+  // connecting so server-side auth mode changes propagate without re-pairing.
+  refreshBrokerDetailsThenConnect(db);
 }
 
 /**

@@ -148,6 +148,9 @@ export class SyncService {
     cloudMqttClient.disconnect();
     this.config = config;
 
+    // Heartbeat is HTTP-only (machine JWT); runs even when MQTT is down.
+    this.startHttpHeartbeat();
+
     if (config.merchantId) {
       cloudMqttClient.onMessage(this._handleIncoming.bind(this));
       const cfg: CloudMqttConfig = {
@@ -159,9 +162,6 @@ export class SyncService {
         },
       };
       cloudMqttClient.connect(cfg);
-      this.heartbeatTimer = setInterval(() => {
-        if (cloudMqttClient.connected) cloudMqttClient.publishHeartbeat();
-      }, 30000);
     } else {
       console.warn('[Sync] No tenant id for MQTT yet — HTTP sync only. Use GET /machines/me then reconnect.');
       this.pullCatalog();
@@ -170,11 +170,29 @@ export class SyncService {
     }
   }
 
-  disconnect(): void {
+  /** POST /machines/me/heartbeat every 30s while cloud sync is active. */
+  startHttpHeartbeat(): void {
+    this.stopHttpHeartbeat();
+    this._postHeartbeatNow();
+    this.heartbeatTimer = setInterval(() => this._postHeartbeatNow(), 30000);
+  }
+
+  stopHttpHeartbeat(): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+  }
+
+  private _postHeartbeatNow(): void {
+    if (!this._effectiveHttpConfig()) return;
+    this.cloudJson('POST', '/machines/me/heartbeat', null, (err) => {
+      if (err) console.warn('[Sync] HTTP heartbeat failed:', err.message);
+    });
+  }
+
+  disconnect(): void {
+    this.stopHttpHeartbeat();
     if (this.pullDebounce) {
       clearTimeout(this.pullDebounce);
       this.pullDebounce = null;

@@ -110,32 +110,6 @@ export class CloudMqttClient {
     this.messageHandlers.push(handler);
   }
 
-  publish(topic: string, payload: Record<string, unknown>): void {
-    if (!this.client || !this._connected) {
-      console.warn('[MQTT] Not connected, cannot publish to', topic);
-      return;
-    }
-    this.client.publish(topic, JSON.stringify(payload), { qos: 1 });
-  }
-
-  /** Ask server to emit catalog/notify (POS then pulls via HTTP). */
-  requestCatalogSync(lastSyncedAt: string | null): void {
-    if (!this.config) return;
-    const { merchantId, machineId } = this.config;
-    this.publish(`pos/${merchantId}/${machineId}/sync/request`, {
-      lastSyncedAt: lastSyncedAt,
-    });
-  }
-
-  publishHeartbeat(): void {
-    if (!this.config) return;
-    const { merchantId, machineId } = this.config;
-    this.publish(`pos/${merchantId}/${machineId}/heartbeat`, {
-      machineId,
-      time: new Date().toISOString(),
-    });
-  }
-
   private _subscribeAll(): void {
     if (!this.config || !this.client) return;
     const { merchantId, machineId } = this.config;
