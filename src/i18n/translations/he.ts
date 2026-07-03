@@ -346,6 +346,11 @@ export const he = {
     printersUseCloud: 'השתמש בברירת מחדל מהענן',
     printersRefresh: 'רענן רשימת מדפסות',
     printersNoneFound: 'לא נמצאו מדפסות במכשיר.',
+    printersPreviewSample: 'תצוגה מקדימה של קבלה לדוגמה',
+    printersPrintSample: 'הדפס קבלה לדוגמה',
+    printersPreviewTitle: 'תצוגה מקדימה של קבלה לדוגמה',
+    printersSamplePrinted: 'קבלה לדוגמה נשלחה למדפסת.',
+    printersSampleFailed: 'לא ניתן להדפיס את הקבלה לדוגמה.',
     nayaxDesc: 'התחברות למכשיר Nayax ברשת לתשלומי אשראי (JSON-RPC, ברירת מחדל פורט 8080).',
     nayaxEnable: 'הפעל תשלום בכרטיס',
     nayaxHost: 'כתובת IP או שם מארח',
@@ -562,6 +567,16 @@ export const he = {
     resetSuccess: 'האיפוס הושלם. מעביר להתחלה ראשונה…',
     resetFailed: 'האיפוס נכשל.',
     back: 'חזרה להתחברות',
+    settingsTitle: 'הגדרות טכנאי',
+    serverUrlLabel: 'כתובת שרת',
+    serverUrlHint:
+      'עקיפת כתובת שרת הענן עבור קופה זו. הסיומת (/api/v1) מתווספת אוטומטית. יחול לאחר הפעלה מחדש של התוכנה.',
+    serverUrlPlaceholder: 'https://pos-cloud-api.fly.dev',
+    serverUrlSave: 'שמור כתובת שרת',
+    serverUrlSaving: 'שומר…',
+    serverUrlSaved: 'כתובת השרת נשמרה. הפעל מחדש את התוכנה כדי להחיל.',
+    serverUrlFailed: 'לא ניתן לשמור את כתובת השרת.',
+    serverUrlRequired: 'הזן כתובת שרת תחילה.',
   },
 
   receipt: {

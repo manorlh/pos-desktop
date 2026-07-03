@@ -8,6 +8,9 @@ import { Alert, AlertDescription } from '../ui/alert';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { buildReceiptHtml } from '@/utils/receiptTemplate';
+import { buildSampleReceiptPayload } from '@/utils/sampleReceipt';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useProductStore } from '@/stores/useProductStore';
 import { useTransactionStore } from '@/stores/useTransactionStore';
@@ -61,6 +64,7 @@ export function SettingsPage() {
     setNayaxSpicyPath,
     setLocalReceiptPrinterName,
     setLocalDrawerPrinterName,
+    getEffectivePrinters,
   } = useSettingsStore();
   const { filterProducts, loadProducts, loadCategories } = useProductStore();
   const { t, setLanguage: setI18nLanguage, locale } = useI18n();
@@ -70,6 +74,9 @@ export function SettingsPage() {
   const [nayaxPathInput, setNayaxPathInput] = useState('');
   const [osPrinters, setOsPrinters] = useState<PrinterDevice[]>([]);
   const [isRefreshingPrinters, setIsRefreshingPrinters] = useState(false);
+  const [samplePreviewHtml, setSamplePreviewHtml] = useState<string | null>(null);
+  const [isPrintingSample, setIsPrintingSample] = useState(false);
+  const [samplePrintResult, setSamplePrintResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTestingNayax, setIsTestingNayax] = useState(false);
   const [nayaxResult, setNayaxResult] = useState<{ success: boolean; message: string } | null>(null);
   const [integrationLogs, setIntegrationLogs] = useState<
@@ -150,6 +157,42 @@ export function SettingsPage() {
       console.error('Failed to load printers', e);
     } finally {
       setIsRefreshingPrinters(false);
+    }
+  };
+
+  const buildSamplePayload = () =>
+    buildSampleReceiptPayload({
+      language: language === 'en' ? 'en' : 'he',
+      globalTaxRate,
+    });
+
+  const handlePreviewSample = () => {
+    setSamplePrintResult(null);
+    setSamplePreviewHtml(buildReceiptHtml(buildSamplePayload()));
+  };
+
+  const handlePrintSample = async () => {
+    if (!window.electronAPI?.printReceipt) return;
+    setIsPrintingSample(true);
+    setSamplePrintResult(null);
+    try {
+      const { receiptPrinterName: effectiveReceiptPrinter } = getEffectivePrinters();
+      const result = await window.electronAPI.printReceipt({
+        ...buildSamplePayload(),
+        printerName: effectiveReceiptPrinter,
+      });
+      setSamplePrintResult(
+        result.success
+          ? { success: true, message: t('settings.printersSamplePrinted') }
+          : { success: false, message: result.error || t('settings.printersSampleFailed') },
+      );
+    } catch (e) {
+      setSamplePrintResult({
+        success: false,
+        message: e instanceof Error ? e.message : t('settings.printersSampleFailed'),
+      });
+    } finally {
+      setIsPrintingSample(false);
     }
   };
 
@@ -981,11 +1024,61 @@ export function SettingsPage() {
             <p className="text-sm text-muted-foreground">{t('settings.printersNoneFound')}</p>
           ) : null}
 
-          <Button type="button" variant="outline" onClick={() => void loadOsPrinters()} disabled={isRefreshingPrinters}>
-            {isRefreshingPrinters ? t('settings.testing') : t('settings.printersRefresh')}
-          </Button>
+          {samplePrintResult ? (
+            <Alert variant={samplePrintResult.success ? 'default' : 'destructive'}>
+              {samplePrintResult.success ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <AlertCircle className="h-4 w-4" />
+              )}
+              <AlertDescription>{samplePrintResult.message}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => void loadOsPrinters()} disabled={isRefreshingPrinters}>
+              {isRefreshingPrinters ? t('settings.testing') : t('settings.printersRefresh')}
+            </Button>
+            <Button type="button" variant="outline" onClick={handlePreviewSample}>
+              {t('settings.printersPreviewSample')}
+            </Button>
+            <Button type="button" onClick={() => void handlePrintSample()} disabled={isPrintingSample}>
+              {isPrintingSample ? t('settings.testing') : t('settings.printersPrintSample')}
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      <Dialog open={samplePreviewHtml !== null} onOpenChange={(open) => !open && setSamplePreviewHtml(null)}>
+        <DialogContent className="sm:max-w-md" dir={language === 'he' ? 'rtl' : 'ltr'}>
+          <DialogHeader>
+            <DialogTitle>{t('settings.printersPreviewTitle')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center">
+            <iframe
+              title={t('settings.printersPreviewTitle')}
+              srcDoc={samplePreviewHtml ?? ''}
+              className="w-[272px] h-[60vh] rounded border bg-white shadow-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSamplePreviewHtml(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handlePrintSample()}
+              disabled={isPrintingSample}
+            >
+              {isPrintingSample ? t('settings.testing') : t('settings.printersPrintSample')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card className="mt-6">
         <CardHeader>

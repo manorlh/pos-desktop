@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useBusinessStore } from '../../stores/useBusinessStore';
@@ -8,6 +8,8 @@ import { useTradingDayStore } from '../../stores/useTradingDayStore';
 import { useTransactionStore } from '../../stores/useTransactionStore';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
 
 interface Props {
   onBack: () => void;
@@ -36,6 +38,48 @@ export function TechnicianScreen({ onBack, onResetComplete }: Props) {
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const [serverUrl, setServerUrl] = useState('');
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverMessage, setServerMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const base = await window.electronAPI?.dbGetSetting?.('cloud_api_base');
+      if (base) setServerUrl(String(base));
+    })();
+  }, []);
+
+  const handleSaveServerUrl = async () => {
+    setServerMessage(null);
+    if (!window.electronAPI?.technicianSetServerUrl) {
+      setServerMessage({ type: 'err', text: t('technician.serverUrlFailed') });
+      return;
+    }
+    if (!serverUrl.trim()) {
+      setServerMessage({ type: 'err', text: t('technician.serverUrlRequired') });
+      return;
+    }
+    setServerBusy(true);
+    try {
+      const res = await window.electronAPI.technicianSetServerUrl(serverUrl.trim());
+      if (!res.success) {
+        setServerMessage({ type: 'err', text: res.error || t('technician.serverUrlFailed') });
+        return;
+      }
+      if (res.apiBaseUrl) setServerUrl(res.apiBaseUrl);
+      setServerMessage({ type: 'ok', text: t('technician.serverUrlSaved') });
+    } catch (e: unknown) {
+      setServerMessage({
+        type: 'err',
+        text: e instanceof Error ? e.message : t('technician.serverUrlFailed'),
+      });
+    } finally {
+      setServerBusy(false);
+    }
+  };
 
   const handleReset = async () => {
     if (!window.electronAPI?.resetDatabase || !window.electronAPI?.showMessageBox) {
@@ -94,6 +138,42 @@ export function TechnicianScreen({ onBack, onResetComplete }: Props) {
           <p className="text-muted-foreground text-sm mt-1">{t('technician.subtitle')}</p>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2 rounded-md border border-border bg-card p-3">
+            <h3 className="text-sm font-semibold">{t('technician.settingsTitle')}</h3>
+            <div className="space-y-2">
+              <Label htmlFor="technician-server-url">{t('technician.serverUrlLabel')}</Label>
+              <Input
+                id="technician-server-url"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder={t('technician.serverUrlPlaceholder')}
+                autoComplete="off"
+                disabled={serverBusy}
+              />
+              <p className="text-xs text-muted-foreground">{t('technician.serverUrlHint')}</p>
+            </div>
+            {serverMessage && (
+              <p
+                className={
+                  'text-sm ' +
+                  (serverMessage.type === 'ok' ? 'text-green-600' : 'text-destructive')
+                }
+              >
+                {serverMessage.text}
+              </p>
+            )}
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSaveServerUrl}
+                disabled={serverBusy || !serverUrl.trim()}
+              >
+                {serverBusy ? t('technician.serverUrlSaving') : t('technician.serverUrlSave')}
+              </Button>
+            </div>
+          </div>
+
           <p className="text-sm text-muted-foreground rounded-md border border-border bg-card p-3">
             {t('technician.warning')}
           </p>

@@ -2001,6 +2001,39 @@ ipcMain.handle('quit-app', () => {
   return { success: true };
 });
 
+/**
+ * Technician override for the cloud server URL. Normalizes to include the API
+ * prefix and stores it as cloud_api_base. Keeps existing credentials — the new
+ * URL is used for sync/MQTT on the next app start (or reconnect).
+ */
+ipcMain.handle('technician-set-server-url', (_event, url: unknown) => {
+  try {
+    const raw = typeof url === 'string' ? url.trim() : '';
+    if (!raw) {
+      return { success: false, error: 'Server URL is required' };
+    }
+    const normalized = normalizeApiBaseUrl(raw);
+    try {
+      // Basic validation — must be a parseable http(s) URL.
+      const u = new URL(normalized);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        return { success: false, error: 'URL must start with http:// or https://' };
+      }
+    } catch {
+      return { success: false, error: 'Invalid server URL' };
+    }
+    const db = getDatabaseMain();
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+      'cloud_api_base',
+      normalized,
+    );
+    return { success: true, apiBaseUrl: normalized };
+  } catch (error: any) {
+    console.error('[IPC] technician-set-server-url error:', error);
+    return { success: false, error: error?.message || 'Failed to save server URL' };
+  }
+});
+
 ipcMain.handle('get-heebo-font-css', () => {
   if (!app.isPackaged) return '';
   const resourcesPath = getPackagedResourcesPath(
@@ -2091,7 +2124,7 @@ ipcMain.handle('print-test', async (event, printerName) => {
         <head>
           <meta charset="utf-8" />
           <style>
-            @page { size: ${THERMAL_PAPER_WIDTH_MM}mm auto; margin: 0; }
+            @page { size: ${THERMAL_PAGE_WIDTH_MM}mm auto; margin: 0; }
             @media print {
               body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
@@ -2138,13 +2171,15 @@ ipcMain.handle('print-test', async (event, printerName) => {
 });
 
 /**
- * 80mm thermal roll geometry. The page is sized to the full paper width so the
- * print isn't left-aligned on the roll (which left a wide right margin), and the
- * HTML uses symmetric side padding so text stays inside the ~72mm printable area
- * the head can actually reach — giving even margins without clipping.
+ * 80mm thermal roll geometry. The head can only print ~72mm, so the PAGE is
+ * sized to that printable width (not the 80mm paper) — printing at 80mm clips
+ * the right edge. The hidden window is laid out at this same width so the height
+ * we measure matches the printed layout (otherwise trailing content spills onto
+ * a second page). Adjust THERMAL_PAGE_WIDTH_MM if a printer's printable width
+ * differs. Keep in sync with the @page/padding in src/utils/receiptTemplate.ts.
  */
-const THERMAL_PAPER_WIDTH_MM = 80;
-const THERMAL_SIDE_PADDING_MM = 4;
+const THERMAL_PAGE_WIDTH_MM = 72;
+const THERMAL_SIDE_PADDING_MM = 3;
 /** CSS px per mm at 96dpi; used to lay out the hidden window at print width. */
 const PX_PER_MM = 96 / 25.4;
 
@@ -2206,7 +2241,7 @@ async function printHtmlToPrinter(
   // measure matches how it will actually paginate when printed. Measuring at a
   // wider window made the receipt look shorter than it prints, so trailing
   // content (footer / support phone) spilled onto a second page.
-  const windowWidthPx = Math.round(THERMAL_PAPER_WIDTH_MM * PX_PER_MM);
+  const windowWidthPx = Math.round(THERMAL_PAGE_WIDTH_MM * PX_PER_MM);
 
   const printWindow = new BrowserWindow({
     show: false,
@@ -2227,13 +2262,13 @@ async function printHtmlToPrinter(
     // rendered content so we can pass a concrete pageSize below.
     const contentHeightPx = await waitForPrintReady(printWindow);
 
-    // Page width = full paper width; the HTML keeps text within the printable
-    // area via symmetric padding. A small height buffer avoids the last line
-    // being pushed to a second page by sub-pixel rounding.
+    // Page width = printable width; the HTML keeps text within it via padding.
+    // A small height buffer avoids the last line being pushed to a second page
+    // by sub-pixel rounding.
     const MICRONS_PER_MM = 1000;
     const MICRONS_PER_PX = 25400 / 96; // 1px = 1/96in, 1in = 25400µm
-    const HEIGHT_BUFFER_MICRONS = Math.round(3 * MICRONS_PER_MM);
-    const pageWidthMicrons = Math.round(THERMAL_PAPER_WIDTH_MM * MICRONS_PER_MM);
+    const HEIGHT_BUFFER_MICRONS = Math.round(2 * MICRONS_PER_MM);
+    const pageWidthMicrons = Math.round(THERMAL_PAGE_WIDTH_MM * MICRONS_PER_MM);
     const pageHeightMicrons = Math.max(
       Math.round((contentHeightPx || 0) * MICRONS_PER_PX) + HEIGHT_BUFFER_MICRONS,
       Math.round(40 * MICRONS_PER_MM),

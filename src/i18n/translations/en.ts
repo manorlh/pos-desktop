@@ -347,6 +347,11 @@ export const en = {
     printersUseCloud: 'Use cloud default',
     printersRefresh: 'Refresh printer list',
     printersNoneFound: 'No printers detected on this device.',
+    printersPreviewSample: 'Preview sample receipt',
+    printersPrintSample: 'Print sample receipt',
+    printersPreviewTitle: 'Sample receipt preview',
+    printersSamplePrinted: 'Sample receipt sent to the printer.',
+    printersSampleFailed: 'Could not print the sample receipt.',
     nayaxDesc: 'Connect to a Nayax device on your network for credit card payments (JSON-RPC on port 8080 by default).',
     nayaxEnable: 'Enable card payments',
     nayaxHost: 'Device IP or hostname',
@@ -566,6 +571,16 @@ export const en = {
     resetSuccess: 'Reset complete. Returning to initial setup…',
     resetFailed: 'Reset failed.',
     back: 'Back to login',
+    settingsTitle: 'Technician settings',
+    serverUrlLabel: 'Server URL',
+    serverUrlHint:
+      'Override the cloud server address for this register. The API prefix (/api/v1) is added automatically. Takes effect after restarting the app.',
+    serverUrlPlaceholder: 'https://pos-cloud-api.fly.dev',
+    serverUrlSave: 'Save server URL',
+    serverUrlSaving: 'Saving…',
+    serverUrlSaved: 'Server URL saved. Restart the app to apply.',
+    serverUrlFailed: 'Could not save the server URL.',
+    serverUrlRequired: 'Enter a server URL first.',
   },
 
   receipt: {

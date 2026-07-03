@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   appRestart: () => ipcRenderer.invoke('app-restart'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
+  technicianSetServerUrl: (url: string) =>
+    ipcRenderer.invoke('technician-set-server-url', url),
   getHeeboFontCss: () => ipcRenderer.invoke('get-heebo-font-css'),
   showMessageBox: (options: any) => ipcRenderer.invoke('show-message-box', options),
   

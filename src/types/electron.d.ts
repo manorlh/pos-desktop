@@ -111,6 +111,9 @@ interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   appRestart: () => Promise<{ success: boolean }>;
   quitApp: () => Promise<{ success: boolean }>;
+  technicianSetServerUrl: (
+    url: string,
+  ) => Promise<{ success: boolean; apiBaseUrl?: string; error?: string }>;
   getHeeboFontCss: () => Promise<string>;
   showMessageBox: (options: any) => Promise<any>;
   
