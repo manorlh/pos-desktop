@@ -27,7 +27,7 @@ export function parseMqttBrokerUrl(broker: string): { host: string; port: number
 }
 
 export type PairingHttpResult =
-  | { ok: true; data: Record<string, unknown>; statusCode: number }
+  | { ok: true; data: Record<string, unknown>; statusCode: number; serverDateMs?: number }
   | { ok: false; error: string; statusCode?: number };
 
 function pairingHttpRequest(
@@ -61,13 +61,23 @@ function pairingHttpRequest(
     };
     const req = lib.request(
       opts,
-      (res: { statusCode?: number; on: (ev: string, fn: (...args: unknown[]) => void) => void }) => {
+      (res: {
+        statusCode?: number;
+        headers?: Record<string, string | string[] | undefined>;
+        on: (ev: string, fn: (...args: unknown[]) => void) => void;
+      }) => {
         let raw = '';
         res.on('data', (c: Buffer) => {
           raw += c.toString();
         });
         res.on('end', () => {
           const code = res.statusCode || 0;
+          // Server clock from the HTTP Date header — lets callers derive a TTL
+          // that is independent of the local (possibly wrong) device clock.
+          const dateHeader = res.headers?.date;
+          const dateStr = Array.isArray(dateHeader) ? dateHeader[0] : dateHeader;
+          const parsed = dateStr ? Date.parse(dateStr) : NaN;
+          const serverDateMs = Number.isFinite(parsed) ? parsed : undefined;
           try {
             const data = raw ? JSON.parse(raw) : {};
             if (code >= 400) {
@@ -80,7 +90,7 @@ function pairingHttpRequest(
                     : raw.slice(0, 200);
               return resolve({ ok: false, error: detail, statusCode: code });
             }
-            resolve({ ok: true, data: data as Record<string, unknown>, statusCode: code });
+            resolve({ ok: true, data: data as Record<string, unknown>, statusCode: code, serverDateMs });
           } catch {
             resolve({ ok: false, error: raw.slice(0, 200) || 'Invalid JSON', statusCode: code });
           }

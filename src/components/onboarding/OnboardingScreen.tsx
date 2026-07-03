@@ -46,7 +46,11 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
   const [machineCode, setMachineCode] = useState<string | null>(null);
   const [deviceNonce, setDeviceNonce] = useState<string | null>(null);
   const [qrPayload, setQrPayload] = useState<string | null>(null);
-  const [qrExpiresAt, setQrExpiresAt] = useState<string | null>(null);
+  // Local-clock (Date.now) ms timestamp when the QR should expire. Anchoring to
+  // the local clock — instead of comparing the server's absolute expiry to
+  // Date.now() — keeps the countdown correct even if the POS device clock is
+  // wrong, which previously made the QR read "expired" the instant it appeared.
+  const [qrLocalExpiresAt, setQrLocalExpiresAt] = useState<number | null>(null);
   const [waitingPhone, setWaitingPhone] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [, setQrExpiryTick] = useState(0);
@@ -128,7 +132,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
     stopPolling();
     setDeviceNonce(null);
     setQrPayload(null);
-    setQrExpiresAt(null);
+    setQrLocalExpiresAt(null);
     setMessage(null);
     const reg = await window.electronAPI.cloudDeviceRegister({
       apiBaseUrl: apiBase.trim(),
@@ -137,16 +141,21 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
       setMessage({ type: 'err', text: reg.error || t('onboarding.qrRegisterFailed') });
       return;
     }
-    const expMs = reg.expiresAt ? new Date(reg.expiresAt).getTime() : Date.now() + 15 * 60 * 1000;
+    // Prefer the server-derived TTL (clock-independent). Fall back to the known
+    // 15-minute nonce lifetime if the header wasn't available.
+    const ttlMs = reg.ttlMs && reg.ttlMs > 0 ? reg.ttlMs : 15 * 60 * 1000;
+    const expSeconds = reg.expiresAt
+      ? Math.floor(new Date(reg.expiresAt).getTime() / 1000)
+      : Math.floor((Date.now() + ttlMs) / 1000);
     const payload = JSON.stringify({
       v: 1,
       api: reg.apiBaseUrl || apiBase.trim(),
       nonce: reg.deviceNonce,
-      exp: Math.floor(expMs / 1000),
+      exp: expSeconds,
     });
     setDeviceNonce(reg.deviceNonce);
     setQrPayload(payload);
-    setQrExpiresAt(reg.expiresAt || null);
+    setQrLocalExpiresAt(Date.now() + ttlMs);
     setWaitingPhone(true);
   }, [apiBase, t]);
 
@@ -161,10 +170,10 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
   }, [phase, paired, pairMode, apiBase, settingsReady]);
 
   useEffect(() => {
-    if (!qrExpiresAt || paired) return;
+    if (!qrLocalExpiresAt || paired) return;
     const tmr = window.setInterval(() => setQrExpiryTick((n) => n + 1), 30000);
     return () => window.clearInterval(tmr);
-  }, [qrExpiresAt, paired]);
+  }, [qrLocalExpiresAt, paired]);
 
   useEffect(() => {
     if (!waitingPhone || !deviceNonce || paired) return;
@@ -279,7 +288,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
       setMachineName('');
       setDeviceNonce(null);
       setQrPayload(null);
-      setQrExpiresAt(null);
+      setQrLocalExpiresAt(null);
       setPhase('welcome');
       autoSyncedRef.current = false;
       await onRefresh();
@@ -294,10 +303,8 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
   };
 
   const qrExpiryLabel = (() => {
-    if (!qrExpiresAt) return null;
-    const expMs = new Date(qrExpiresAt).getTime();
-    if (!Number.isFinite(expMs)) return null;
-    const remainingMs = expMs - Date.now();
+    if (!qrLocalExpiresAt) return null;
+    const remainingMs = qrLocalExpiresAt - Date.now();
     if (remainingMs <= 0) return t('onboarding.qrExpired');
     const minutes = Math.max(1, Math.ceil(remainingMs / 60000));
     return t('onboarding.qrExpiresIn', { minutes: String(minutes) });

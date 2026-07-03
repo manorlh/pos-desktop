@@ -4061,10 +4061,21 @@ ipcMain.handle(
         return { success: false, error: r.error, statusCode: r.statusCode };
       }
       const d = r.data;
+      const expiresAt = String(d.expiresAt ?? '');
+      // TTL derived purely from server timestamps (expiresAt - server "now" from
+      // the Date header). This is immune to the POS device clock being wrong,
+      // which otherwise makes the QR look expired the moment it is shown.
+      let ttlMs: number | undefined;
+      const expMs = expiresAt ? Date.parse(expiresAt) : NaN;
+      if (Number.isFinite(expMs) && r.serverDateMs) {
+        const delta = expMs - r.serverDateMs;
+        if (delta > 0) ttlMs = delta;
+      }
       return {
         success: true,
         deviceNonce: String(d.deviceNonce ?? ''),
-        expiresAt: String(d.expiresAt ?? ''),
+        expiresAt,
+        ttlMs,
         apiBaseUrl: normalizeApiBaseUrl(payload.apiBaseUrl),
       };
     } catch (e: any) {

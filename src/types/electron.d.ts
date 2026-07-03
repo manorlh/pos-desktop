@@ -230,7 +230,14 @@ interface ElectronAPI {
     apiBaseUrl: string;
     machineName?: string;
   }) => Promise<
-    | { success: true; deviceNonce: string; expiresAt: string; apiBaseUrl: string }
+    | {
+        success: true;
+        deviceNonce: string;
+        expiresAt: string;
+        /** Server-derived time-to-live in ms, independent of the local clock. */
+        ttlMs?: number;
+        apiBaseUrl: string;
+      }
     | { success: false; error: string; statusCode?: number }
   >;
   cloudDevicePollStatus: (payload: {
