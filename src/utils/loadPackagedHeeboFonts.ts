@@ -14,12 +14,14 @@ export async function loadPackagedHeeboFonts(): Promise<void> {
     style.textContent = css;
     document.head.prepend(style);
 
-    await Promise.all([
-      document.fonts.load('400 16px Heebo'),
-      document.fonts.load('500 16px Heebo'),
-      document.fonts.load('600 16px Heebo'),
-      document.fonts.load('700 16px Heebo'),
-    ]);
+    // Warm both scripts (Hebrew + Latin/digits) for each weight so the correct
+    // subset face is ready before first paint.
+    const samples = ['שלום 0123', 'Abc 0123'];
+    await Promise.all(
+      ['400', '500', '600', '700'].flatMap((w) =>
+        samples.map((s) => document.fonts.load(`${w} 16px Heebo`, s)),
+      ),
+    );
   } catch (e) {
     console.warn('[fonts] Failed to load packaged Heebo:', e);
   }
