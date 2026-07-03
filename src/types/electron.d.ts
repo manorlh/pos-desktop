@@ -223,6 +223,7 @@ interface ElectronAPI {
         machineCode: string;
         mqttHost: string;
         mqttPort: number;
+        mqttTls?: boolean;
       }
     | { success: false; error: string; statusCode?: number }
   >;
@@ -258,6 +259,7 @@ interface ElectronAPI {
         machineCode?: string;
         mqttHost?: string;
         mqttPort?: number;
+        mqttTls?: boolean;
         error?: string;
       }
     | { success: false; error: string; statusCode?: number }
@@ -272,6 +274,7 @@ interface ElectronAPI {
     machineCode?: string;
     host: string;
     port: number;
+    tls?: boolean;
     clientId?: string;
     username?: string;
     password?: string;

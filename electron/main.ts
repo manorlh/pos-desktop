@@ -938,11 +938,16 @@ function _doConnectMqttFromSettings(db: any): boolean {
   const clientId = readSettingMain(db, 'mqtt_cloud_client_id');
   const username = readSettingMain(db, 'mqtt_cloud_username');
   const password = readSettingMain(db, 'mqtt_cloud_password');
+  // Prefer the stored flag; fall back to inferring TLS from the standard
+  // secure MQTT port so machines paired before the flag existed still recover.
+  const tlsSetting = readSettingMain(db, 'mqtt_cloud_tls');
+  const tls = tlsSetting === '1' || (tlsSetting == null && port === 8883);
   try {
     syncService.init(db);
     syncService.connect({
       host: host.trim(),
       port: Number.isFinite(port) && port > 0 ? port : 1883,
+      tls,
       merchantId: tenantId,
       machineId: machineId.trim(),
       apiBaseUrl: apiBaseUrl.trim(),
@@ -4136,6 +4141,9 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     put('cloud_sync_enabled', '1');
     if (config.host) put('mqtt_cloud_host', String(config.host));
     if (config.port != null) put('mqtt_cloud_port', String(config.port));
+    const tls =
+      config.tls === true || config.mqttTls === true || Number(config.port) === 8883;
+    put('mqtt_cloud_tls', tls ? '1' : '0');
     if (config.clientId != null && config.clientId !== '')
       put('mqtt_cloud_client_id', String(config.clientId));
     if (config.username != null && config.username !== '')
@@ -4146,6 +4154,7 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     syncService.connect({
       host: String(config.host),
       port: Number(config.port) || 1883,
+      tls,
       merchantId: tenantId || String(config.merchantId || ''),
       machineId: String(config.machineId),
       apiBaseUrl: String(config.apiBaseUrl),
@@ -4202,6 +4211,7 @@ ipcMain.handle('cloud-unpair', async () => {
       'cloud_shop_id',
       'mqtt_cloud_host',
       'mqtt_cloud_port',
+      'mqtt_cloud_tls',
       'mqtt_cloud_client_id',
       'mqtt_cloud_username',
       'mqtt_cloud_password',

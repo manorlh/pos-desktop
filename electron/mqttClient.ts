@@ -19,6 +19,8 @@ export interface CloudMqttConfig {
   clientId?: string;
   username?: string;
   password?: string;
+  /** Broker requires TLS (mqtts://). EMQX Serverless uses TLS on 8883. */
+  tls?: boolean;
   /** Called after MQTT connect (subscribe catalog/notify). Pull catalog over HTTP here. */
   onMqttConnected?: () => void;
 }
@@ -39,9 +41,10 @@ export class CloudMqttClient {
     }
 
     this.config = config;
-    const brokerUrl = `mqtt://${config.host}:${config.port}`;
+    const protocol = config.tls ? 'mqtts' : 'mqtt';
+    const brokerUrl = `${protocol}://${config.host}:${config.port}`;
 
-    this.client = MqttLib.connect(brokerUrl, {
+    const options: Record<string, unknown> = {
       clientId: config.clientId || `pos-machine-${config.machineId}`,
       username: config.username,
       password: config.password,
@@ -49,7 +52,16 @@ export class CloudMqttClient {
       connectTimeout: 10000,
       keepalive: 60,
       clean: true,
-    });
+    };
+    if (config.tls) {
+      // EMQX Serverless presents a publicly-trusted cert; rely on Node's CA
+      // bundle. Keep verification on for security.
+      options.protocol = 'mqtts';
+      options.rejectUnauthorized = true;
+    }
+
+    console.log('[MQTT] Connecting to', brokerUrl, config.tls ? '(TLS)' : '(plaintext)');
+    this.client = MqttLib.connect(brokerUrl, options);
 
     this.client.on('connect', () => {
       this._connected = true;

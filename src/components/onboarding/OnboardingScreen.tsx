@@ -28,6 +28,7 @@ type ConnectPayload = {
   machineCode: string;
   mqttHost: string;
   mqttPort: number;
+  mqttTls?: boolean;
   mqttClientId: string;
   mqttUsername: string;
   mqttPassword: string;
@@ -99,6 +100,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
       machineCode: res.machineCode,
       host: res.mqttHost,
       port: res.mqttPort,
+      tls: res.mqttTls,
       clientId: res.mqttClientId,
       username: res.mqttUsername,
       password: res.mqttPassword,
@@ -205,6 +207,7 @@ export function OnboardingScreen({ paired, onPaired, hasUsers, onRefresh }: Prop
             machineCode: poll.machineCode || '',
             mqttHost: poll.mqttHost || 'localhost',
             mqttPort: poll.mqttPort || 1883,
+            mqttTls: poll.mqttTls,
             mqttClientId: poll.mqttClientId || '',
             mqttUsername: poll.mqttUsername || '',
             mqttPassword: poll.mqttPassword || '',

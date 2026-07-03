@@ -161,5 +161,9 @@ export function pairingCredentialsFromValidateData(d: Record<string, unknown>, a
     machineCode: String(d.machineCode ?? ''),
     mqttHost: host,
     mqttPort: port,
+    // Whether the broker requires TLS (EMQX Serverless on 8883). Must be
+    // propagated to the MQTT client, otherwise it connects with plaintext
+    // mqtt:// and the connection silently fails (no heartbeat, no catalog).
+    mqttTls: d.mqttTls === true || d.mqttTls === 'true',
   };
 }
