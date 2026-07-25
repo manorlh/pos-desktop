@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  mainLogGetInfo: () => ipcRenderer.invoke('main-log-get-info'),
+  mainLogOpenFolder: () => ipcRenderer.invoke('main-log-open-folder'),
+  mainLogReadRecent: (maxLines?: number) => ipcRenderer.invoke('main-log-read-recent', maxLines),
   appRestart: () => ipcRenderer.invoke('app-restart'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   technicianSetServerUrl: (url: string) =>

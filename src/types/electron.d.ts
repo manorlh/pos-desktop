@@ -109,6 +109,9 @@ interface IntegrationLogRow {
 
 interface ElectronAPI {
   getAppVersion: () => Promise<string>;
+  mainLogGetInfo: () => Promise<{ logFile: string; logDir: string }>;
+  mainLogOpenFolder: () => Promise<{ success: boolean; error?: string }>;
+  mainLogReadRecent: (maxLines?: number) => Promise<{ lines: string[]; logFile: string }>;
   appRestart: () => Promise<{ success: boolean }>;
   quitApp: () => Promise<{ success: boolean }>;
   technicianSetServerUrl: (

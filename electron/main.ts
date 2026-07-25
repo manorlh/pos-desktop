@@ -49,6 +49,13 @@ import {
 import { buildReceiptHtml, type ReceiptPrintPayload } from '../src/utils/receiptTemplate';
 import { buildVoucherHtml, type VoucherPrintPayload } from '../src/utils/voucherTemplate';
 import { buildHeeboFontFaceCss, getPackagedResourcesPath } from './fontAssets';
+import {
+  getMainLogDirPath,
+  getMainLogFilePath,
+  initMainLogger,
+  openMainLogsFolder,
+  readRecentMainLogs,
+} from './mainLogger';
 
 const mainDirname = path.dirname(__filename);
 // Resolve better-sqlite3 from project root node_modules
@@ -1923,6 +1930,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.whenReady().then(() => {
+  initMainLogger();
+
   protocol.handle('pos-asset', (request: { url: string }) => {
     try {
       const parsed = new URL(request.url);
@@ -2009,6 +2018,18 @@ app.whenReady().then(() => {
 // Handle IPC messages
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('main-log-get-info', () => ({
+  logFile: getMainLogFilePath(),
+  logDir: getMainLogDirPath(),
+}));
+
+ipcMain.handle('main-log-open-folder', () => openMainLogsFolder());
+
+ipcMain.handle('main-log-read-recent', (_event, maxLines?: unknown) => {
+  const n = typeof maxLines === 'number' && maxLines > 0 ? Math.min(maxLines, 500) : 200;
+  return readRecentMainLogs(n);
 });
 
 ipcMain.handle('app-restart', () => {
@@ -3439,7 +3460,17 @@ ipcMain.handle('pos-users-list-for-shop', async () => {
 /** Verify a PIN locally. */
 ipcMain.handle('pos-user-login', async (_event, pin: string) => {
   try {
-    return authService.verifyPin(String(pin || ''));
+    const result = authService.verifyPin(String(pin || ''));
+    if (result.ok) {
+      try {
+        const db = getDatabaseMain();
+        syncService.init(db);
+        syncService.refreshOnLogin();
+      } catch (e) {
+        console.warn('[Sync] Login refresh skipped:', e);
+      }
+    }
+    return result;
   } catch (error: any) {
     return { ok: false, reason: 'invalid_pin' as const, error: error.message };
   }

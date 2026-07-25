@@ -88,6 +88,9 @@ export function SettingsPage() {
   >([]);
   const [integrationLogsTotal, setIntegrationLogsTotal] = useState(0);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [mainLogPath, setMainLogPath] = useState('');
+  const [mainLogLines, setMainLogLines] = useState<string[]>([]);
+  const [isLoadingMainLog, setIsLoadingMainLog] = useState(false);
   const [isDeletingTransactions, setIsDeletingTransactions] = useState(false);
   const [isCleaningDatabase, setIsCleaningDatabase] = useState(false);
   const deleteAllTransactions = useTransactionStore((s) => s.deleteAllTransactions);
@@ -223,7 +226,42 @@ export function SettingsPage() {
 
   useEffect(() => {
     void loadIntegrationLogs();
+    void loadMainProcessLogs();
   }, []);
+
+  const loadMainProcessLogs = async () => {
+    if (!window.electronAPI?.mainLogReadRecent) return;
+    setIsLoadingMainLog(true);
+    try {
+      const info = await window.electronAPI.mainLogGetInfo?.();
+      if (info?.logFile) setMainLogPath(info.logFile);
+      const r = await window.electronAPI.mainLogReadRecent(200);
+      if (r?.logFile) setMainLogPath(r.logFile);
+      setMainLogLines(r?.lines ?? []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingMainLog(false);
+    }
+  };
+
+  const handleOpenMainLogFolder = async () => {
+    const r = await window.electronAPI?.mainLogOpenFolder?.();
+    if (r && !r.success) {
+      setCloudMessage({ type: 'err', text: r.error || t('settings.mainLogOpenFailed') });
+    }
+  };
+
+  const handleCopyMainLog = async () => {
+    const text = mainLogLines.join('\n');
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCloudMessage({ type: 'ok', text: t('settings.mainLogCopied') });
+    } catch {
+      setCloudMessage({ type: 'err', text: t('settings.mainLogCopyFailed') });
+    }
+  };
 
   useEffect(() => {
     // Update tax rate input when globalTaxRate changes
@@ -1157,6 +1195,58 @@ export function SettingsPage() {
               {isTestingNayax ? t('settings.nayaxTesting') : t('settings.nayaxTestDevice')}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            {t('settings.mainLogTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.mainLogDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {mainLogPath ? (
+            <p className="text-xs text-muted-foreground font-mono break-all">{mainLogPath}</p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void loadMainProcessLogs()}
+              disabled={isLoadingMainLog}
+            >
+              {isLoadingMainLog ? '…' : t('settings.mainLogRefresh')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleOpenMainLogFolder()}
+              disabled={!window.electronAPI?.mainLogOpenFolder}
+            >
+              <FolderOpen className="h-4 w-4 me-1" />
+              {t('settings.mainLogOpenFolder')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleCopyMainLog()}
+              disabled={mainLogLines.length === 0}
+            >
+              {t('settings.mainLogCopy')}
+            </Button>
+          </div>
+          {mainLogLines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('settings.mainLogEmpty')}</p>
+          ) : (
+            <pre className="max-h-[320px] overflow-y-auto text-xs font-mono border rounded-md p-2 bg-muted/30 whitespace-pre-wrap break-all">
+              {mainLogLines.join('\n')}
+            </pre>
+          )}
         </CardContent>
       </Card>
 

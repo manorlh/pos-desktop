@@ -217,12 +217,25 @@ export class SyncService {
   /**
    * Pull catalog from cloud (debounced). Uses connect() config or stored DB settings.
    */
-  pullCatalog(): void {
+  pullCatalog(options?: { full?: boolean }): void {
+    const full = options?.full === true;
     if (this.pullDebounce) clearTimeout(this.pullDebounce);
     this.pullDebounce = setTimeout(() => {
       this.pullDebounce = null;
-      this._pullCatalogNow();
+      this._pullCatalogNow(full);
     }, 250);
+  }
+
+  /**
+   * After a successful cashier login: delta catalog + settings + pos-users (if cloud paired).
+   * Catches missed Ably notifies; uses delta catalog to stay efficient.
+   */
+  refreshOnLogin(): void {
+    if (!this.readCloudHttpConfigFromDb()) return;
+    console.log('[Sync] Login — refreshing cloud data (delta catalog)');
+    this.pullCatalog();
+    posUserSyncService.pullPosUsers();
+    settingsSyncService.pullSettings();
   }
 
   private _effectiveHttpConfig(): CloudHttpConfig | null {
@@ -236,20 +249,22 @@ export class SyncService {
     return this.readCloudHttpConfigFromDb();
   }
 
-  private _pullCatalogNow(): void {
+  private _pullCatalogNow(full = false): void {
     if (!this.db) return;
     const httpCfg = this._effectiveHttpConfig();
     if (!httpCfg) {
       console.warn('[Sync] pullCatalog: no cloud HTTP config');
       return;
     }
-    const lastRow = this.db.prepare("SELECT value FROM settings WHERE key = 'cloud_last_sync'").get() as
-      | { value: string }
-      | undefined;
-    const since = lastRow && lastRow.value ? String(lastRow.value) : null;
     const base = httpCfg.apiBaseUrl.replace(/\/$/, '');
     let path = '/sync/' + httpCfg.machineId + '/catalog';
-    if (since) path += '?since=' + encodeURIComponent(since);
+    if (!full) {
+      const lastRow = this.db.prepare("SELECT value FROM settings WHERE key = 'cloud_last_sync'").get() as
+        | { value: string }
+        | undefined;
+      const since = lastRow && lastRow.value ? String(lastRow.value) : null;
+      if (since) path += '?since=' + encodeURIComponent(since);
+    }
     const urlStr = base + path;
 
     httpJson('GET', urlStr, httpCfg.accessToken, null, (err, _code, data) => {
@@ -339,7 +354,9 @@ export class SyncService {
     });
     apply();
 
-    this._updateLastSync();
+    const serverTime =
+      (data.serverTime as string) || (data.server_time as string) || null;
+    this._updateLastSync(serverTime);
     console.log('[Sync] Applied catalog pull:', syncType, products.length, 'products,', categories.length, 'categories,', vouchers.length, 'vouchers');
 
     void imageCacheService.prefetchCatalog().then(() => {
@@ -427,8 +444,9 @@ export class SyncService {
 
   private _handleIncoming(event: string, _payload: Record<string, unknown>): void {
     if (event === 'catalog') {
-      console.log('[Sync] catalog notify — pulling via HTTP');
-      this.pullCatalog();
+      console.log('[Sync] catalog notify — pulling via HTTP (full)');
+      // Match Settings manual pull: delta can miss new shop assortment rows.
+      this.pullCatalog({ full: true });
       return;
     }
     if (event === 'pos-users') {
@@ -813,11 +831,13 @@ export class SyncService {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_tx ON stock_movements(transaction_id)`);
   }
 
-  private _updateLastSync(): void {
+  private _updateLastSync(serverTime?: string | null): void {
     if (!this.db) return;
+    const watermark =
+      serverTime && Number.isFinite(Date.parse(serverTime)) ? serverTime : nowIso();
     this.db.prepare(`
       INSERT OR REPLACE INTO settings (key, value) VALUES ('cloud_last_sync', ?)
-    `).run(nowIso());
+    `).run(watermark);
   }
 }
 
