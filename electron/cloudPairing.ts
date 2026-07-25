@@ -14,18 +14,6 @@ export function normalizeApiBaseUrl(input: string): string {
   return s;
 }
 
-/** Parse broker string like "localhost:1883" or "host:8883". */
-export function parseMqttBrokerUrl(broker: string): { host: string; port: number } {
-  const s = broker.trim();
-  const idx = s.lastIndexOf(':');
-  if (idx <= 0 || idx === s.length - 1) {
-    return { host: s || 'localhost', port: 1883 };
-  }
-  const host = s.slice(0, idx);
-  const p = parseInt(s.slice(idx + 1), 10);
-  return { host: host || 'localhost', port: Number.isFinite(p) && p > 0 ? p : 1883 };
-}
-
 export type PairingHttpResult =
   | { ok: true; data: Record<string, unknown>; statusCode: number; serverDateMs?: number }
   | { ok: false; error: string; statusCode?: number };
@@ -72,8 +60,6 @@ function pairingHttpRequest(
         });
         res.on('end', () => {
           const code = res.statusCode || 0;
-          // Server clock from the HTTP Date header — lets callers derive a TTL
-          // that is independent of the local (possibly wrong) device clock.
           const dateHeader = res.headers?.date;
           const dateStr = Array.isArray(dateHeader) ? dateHeader[0] : dateHeader;
           const parsed = dateStr ? Date.parse(dateStr) : NaN;
@@ -140,8 +126,6 @@ export function getDevicePollStatus(
 }
 
 export function pairingCredentialsFromValidateData(d: Record<string, unknown>, apiBaseUrl: string) {
-  const broker = String(d.mqttBrokerUrl || '');
-  const { host, port } = parseMqttBrokerUrl(broker);
   const tenantId =
     d.tenantId != null && d.tenantId !== ''
       ? String(d.tenantId)
@@ -156,14 +140,8 @@ export function pairingCredentialsFromValidateData(d: Record<string, unknown>, a
     shopId: d.shopId != null && d.shopId !== '' ? String(d.shopId) : '',
     accessToken: String(d.accessToken ?? ''),
     mqttClientId: String(d.mqttClientId ?? ''),
-    mqttUsername: String(d.mqttUsername ?? ''),
-    mqttPassword: String(d.mqttPassword ?? ''),
     machineCode: String(d.machineCode ?? ''),
-    mqttHost: host,
-    mqttPort: port,
-    // Whether the broker requires TLS (EMQX Serverless on 8883). Must be
-    // propagated to the MQTT client, otherwise it connects with plaintext
-    // mqtt:// and the connection silently fails (no heartbeat, no catalog).
-    mqttTls: d.mqttTls === true || d.mqttTls === 'true',
+    realtimeChannel: d.realtimeChannel != null ? String(d.realtimeChannel) : '',
+    ablyAuthUrl: d.ablyAuthUrl != null ? String(d.ablyAuthUrl) : '',
   };
 }

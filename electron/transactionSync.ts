@@ -11,7 +11,7 @@
 
 import { syncService } from './syncService';
 import { stockSyncService } from './stockSyncService';
-import { cloudMqttClient } from './mqttClient';
+import { cloudAblyClient } from './ablyClient';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const cryptoMod = require('crypto');
@@ -110,10 +110,8 @@ export class TransactionSyncService {
     this.db = db;
     this._resetOrphans();
     this._startPeriodicFlush();
-    cloudMqttClient.onMessage((topic) => {
-      // When the MQTT client connects we get a small wave of inbound messages; use any of those
-      // as a "we have connectivity" hint to drain the outbox.
-      if (typeof topic === 'string' && topic.length > 0) {
+    cloudAblyClient.onMessage((event) => {
+      if (typeof event === 'string' && event.length > 0) {
         this.scheduleFlush();
       }
     });

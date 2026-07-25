@@ -1,11 +1,11 @@
 /**
- * Catalog sync: MQTT catalog/notify is a wake-up only; data is loaded via HTTP GET /sync/{machineId}/catalog.
- * Cloud is source of truth — use cloud APIs for creates/updates (see main process IPC).
+ * Catalog sync: Ably notify is a wake-up only; data is loaded via HTTP GET /sync/{machineId}/catalog.
  */
 
-import { cloudMqttClient, CloudMqttConfig } from './mqttClient';
+import { cloudAblyClient, CloudRealtimeConfig } from './ablyClient';
 import { posUserSyncService } from './posUserSync';
 import { settingsSyncService } from './settingsSyncService';
+import { readSecretSetting } from './secureSecrets';
 import { imageCacheService } from './imageCacheService';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -111,7 +111,7 @@ function httpJson(
 
 export class SyncService {
   private db: any = null;
-  private config: CloudMqttConfig | null = null;
+  private config: CloudRealtimeConfig | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pullDebounce: NodeJS.Timeout | null = null;
 
@@ -134,36 +134,38 @@ export class SyncService {
       return r ? r.value : null;
     };
     const apiBaseUrl = g('cloud_api_base');
-    const accessToken = g('cloud_access_token');
+    const accessToken = readSecretSetting(this.db, 'cloud_access_token');
     const machineId = g('cloud_machine_id');
     if (!apiBaseUrl || !accessToken || !machineId) return null;
     return { apiBaseUrl, accessToken, machineId };
   }
 
-  connect(config: CloudMqttConfig): void {
+  connect(config: CloudRealtimeConfig): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
-    cloudMqttClient.disconnect();
+    cloudAblyClient.disconnect();
     this.config = config;
 
-    // Heartbeat is HTTP-only (machine JWT); runs even when MQTT is down.
     this.startHttpHeartbeat();
 
-    if (config.merchantId) {
-      cloudMqttClient.onMessage(this._handleIncoming.bind(this));
-      const cfg: CloudMqttConfig = {
+    if (config.tenantId) {
+      this.pullCatalog();
+      posUserSyncService.pullPosUsers();
+      settingsSyncService.pullSettings();
+
+      cloudAblyClient.onMessage(this._handleIncoming.bind(this));
+      cloudAblyClient.connect({
         ...config,
-        onMqttConnected: () => {
+        onConnected: () => {
           this.pullCatalog();
           posUserSyncService.pullPosUsers();
           settingsSyncService.pullSettings();
         },
-      };
-      cloudMqttClient.connect(cfg);
+      });
     } else {
-      console.warn('[Sync] No tenant id for MQTT yet — HTTP sync only. Use GET /machines/me then reconnect.');
+      console.warn('[Sync] No tenant id for Ably yet — HTTP sync only. Use GET /machines/me then reconnect.');
       this.pullCatalog();
       posUserSyncService.pullPosUsers();
       settingsSyncService.pullSettings();
@@ -186,9 +188,14 @@ export class SyncService {
 
   private _postHeartbeatNow(): void {
     if (!this._effectiveHttpConfig()) return;
-    this.cloudJson('POST', '/machines/me/heartbeat', null, (err) => {
-      if (err) console.warn('[Sync] HTTP heartbeat failed:', err.message);
-    });
+    this.cloudJson(
+      'POST',
+      '/machines/me/heartbeat',
+      { mqttConnected: cloudAblyClient.connected },
+      (err) => {
+        if (err) console.warn('[Sync] HTTP heartbeat failed:', err.message);
+      },
+    );
   }
 
   disconnect(): void {
@@ -197,7 +204,7 @@ export class SyncService {
       clearTimeout(this.pullDebounce);
       this.pullDebounce = null;
     }
-    cloudMqttClient.disconnect();
+    cloudAblyClient.disconnect();
     this.config = null;
   }
 
@@ -398,7 +405,7 @@ export class SyncService {
   }
 
   flushQueue(): void {
-    /* no-op: MQTT catalog/update path disabled server-side */
+    /* no-op: legacy MQTT catalog/update path disabled server-side */
   }
 
   getStatus(): SyncStatus {
@@ -412,30 +419,29 @@ export class SyncService {
 
     return {
       enabled: !!this.config || !!this.readCloudHttpConfigFromDb(),
-      connected: cloudMqttClient.connected,
+      connected: cloudAblyClient.connected,
       pendingCount,
       lastSyncedAt: lastSyncRow ? lastSyncRow.value : null,
     };
   }
 
-  private _handleIncoming(topic: string, _payload: Record<string, unknown>): void {
-    const parts = topic.split('/');
-    if (parts.length >= 5 && parts[3] === 'catalog' && parts[4] === 'notify') {
-      console.log('[Sync] catalog/notify — pulling via HTTP');
+  private _handleIncoming(event: string, _payload: Record<string, unknown>): void {
+    if (event === 'catalog') {
+      console.log('[Sync] catalog notify — pulling via HTTP');
       this.pullCatalog();
       return;
     }
-    if (parts.length >= 5 && parts[3] === 'pos-users' && parts[4] === 'notify') {
-      console.log('[Sync] pos-users/notify — pulling via HTTP');
+    if (event === 'pos-users') {
+      console.log('[Sync] pos-users notify — pulling via HTTP');
       posUserSyncService.pullPosUsers();
       return;
     }
-    if (parts.length >= 5 && parts[3] === 'settings' && parts[4] === 'notify') {
-      console.log('[Sync] settings/notify — pulling via HTTP');
+    if (event === 'settings') {
+      console.log('[Sync] settings notify — pulling via HTTP');
       settingsSyncService.pullSettings();
       return;
     }
-    if (parts.length >= 5 && parts[3] === 'close-day' && parts[4] === 'notify') {
+    if (event === 'close-day') {
       console.log('[Sync] close-day/notify — forwarding to renderer');
       const payload = _payload as {
         requestId?: string;

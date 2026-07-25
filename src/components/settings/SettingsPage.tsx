@@ -26,12 +26,8 @@ type CloudPairSession = {
   tenantId: string;
   merchantId: string;
   shopId: string;
-  mqttHost: string;
-  mqttPort: number;
-  mqttClientId: string;
-  mqttUsername: string;
-  mqttPassword: string;
   machineCode: string;
+  realtimeChannel?: string;
 };
 
 export function SettingsPage() {
@@ -128,11 +124,8 @@ export function SettingsPage() {
       tenantId: session.tenantId || session.merchantId,
       merchantId: session.merchantId || session.tenantId,
       shopId: session.shopId,
-      host: session.mqttHost,
-      port: session.mqttPort,
-      clientId: session.mqttClientId,
-      username: session.mqttUsername,
-      password: session.mqttPassword,
+      machineCode: session.machineCode,
+      realtimeChannel: session.realtimeChannel,
     });
   };
 
@@ -421,12 +414,8 @@ export function SettingsPage() {
         tenantId: res.tenantId || res.merchantId || '',
         merchantId: res.merchantId || res.tenantId || '',
         shopId: res.shopId,
-        mqttHost: res.mqttHost,
-        mqttPort: res.mqttPort,
-        mqttClientId: res.mqttClientId,
-        mqttUsername: res.mqttUsername,
-        mqttPassword: res.mqttPassword,
         machineCode: res.machineCode,
+        realtimeChannel: res.realtimeChannel,
       };
       setCloudSession(session);
       const conn = await applyCloudConnect(session);

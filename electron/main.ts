@@ -12,7 +12,14 @@ import { settingsSyncService } from './settingsSyncService';
 import { stockSyncService } from './stockSyncService';
 import { authService } from './auth';
 import { imageCacheService } from './imageCacheService';
-import { normalizeApiBaseUrl, parseMqttBrokerUrl, postPairingValidate, postDeviceRegister, getDevicePollStatus, pairingCredentialsFromValidateData } from './cloudPairing';
+import { normalizeApiBaseUrl, postPairingValidate, postDeviceRegister, getDevicePollStatus, pairingCredentialsFromValidateData } from './cloudPairing';
+import {
+  clearSecretSetting,
+  isSecretSettingKey,
+  migratePlaintextSecrets,
+  readSecretSetting,
+  writeSecretSetting,
+} from './secureSecrets';
 
 import {
   callNayaxJsonRpc,
@@ -552,7 +559,8 @@ function initializeDatabaseMain(dbPath: string): any {
   settingsSyncService.init(dbInstance);
   stockSyncService.init(dbInstance);
   authService.init(dbInstance);
-  tryReconnectCloudMqttFromDb(dbInstance);
+  migratePlaintextSecrets(dbInstance);
+  tryReconnectCloudRealtimeFromDb(dbInstance);
   dbSleepPaused = false;
 
   return dbInstance;
@@ -882,7 +890,7 @@ function isSqliteOpen(db: any): boolean {
   return !!db && (typeof db.open !== 'boolean' || db.open);
 }
 
-/** MQTT topics use pos/{tenantId}/{machineId}/… — stored as cloud_tenant_id (legacy: cloud_merchant_id). */
+/** Ably channels use pos:{tenantId}:{machineId} — tenant stored as cloud_tenant_id. */
 function readMqttTenantIdMain(db: any): string | null {
   return (
     readSettingMain(db, 'cloud_tenant_id')?.trim() ||
@@ -894,11 +902,7 @@ function readMqttTenantIdMain(db: any): string | null {
 interface MachineMeContext {
   tenantId: string | null;
   shopId: string | null;
-  mqttHost?: string | null;
-  mqttPort?: number | null;
-  mqttTls?: boolean | null;
-  mqttUsername?: string | null;
-  mqttPassword?: string | null;
+  realtimeChannel?: string | null;
 }
 
 function persistMachineContextMain(db: any, ctx: MachineMeContext): void {
@@ -912,13 +916,7 @@ function persistMachineContextMain(db: any, ctx: MachineMeContext): void {
   if (ctx.shopId) {
     put('cloud_shop_id', ctx.shopId);
   }
-  // Refresh broker connection details so machines paired before these fields
-  // existed (or after a broker/credential change) recover without re-pairing.
-  if (ctx.mqttHost) put('mqtt_cloud_host', ctx.mqttHost);
-  if (ctx.mqttPort != null) put('mqtt_cloud_port', String(ctx.mqttPort));
-  if (ctx.mqttTls != null) put('mqtt_cloud_tls', ctx.mqttTls ? '1' : '0');
-  if (ctx.mqttUsername) put('mqtt_cloud_username', ctx.mqttUsername);
-  if (ctx.mqttPassword) put('mqtt_cloud_password', ctx.mqttPassword);
+  if (ctx.realtimeChannel) put('cloud_realtime_channel', ctx.realtimeChannel);
 }
 
 function parseMachineMeResponse(data: unknown): MachineMeContext {
@@ -929,69 +927,40 @@ function parseMachineMeResponse(data: unknown): MachineMeContext {
       ? String(d.merchantId)
       : null;
   const shopId = d.shopId ? String(d.shopId) : null;
-  let mqttHost: string | null = null;
-  let mqttPort: number | null = null;
-  const brokerUrl = d.mqttBrokerUrl ? String(d.mqttBrokerUrl) : '';
-  if (brokerUrl) {
-    const cleaned = brokerUrl.replace(/^mqtts?:\/\//, '');
-    const [h, p] = cleaned.split(':');
-    if (h) mqttHost = h;
-    if (p && Number.isFinite(Number(p))) mqttPort = Number(p);
-  }
-  const mqttTls = typeof d.mqttTls === 'boolean' ? (d.mqttTls as boolean) : null;
-  const mqttUsername = d.mqttUsername ? String(d.mqttUsername) : null;
-  const mqttPassword = d.mqttPassword ? String(d.mqttPassword) : null;
-  return { tenantId, shopId, mqttHost, mqttPort, mqttTls, mqttUsername, mqttPassword };
+  const realtimeChannel = d.realtimeChannel ? String(d.realtimeChannel) : null;
+  return { tenantId, shopId, realtimeChannel };
 }
 
-function _doConnectMqttFromSettings(db: any): boolean {
-  const host = readSettingMain(db, 'mqtt_cloud_host');
-  const portStr = readSettingMain(db, 'mqtt_cloud_port');
+function _doConnectRealtimeFromSettings(db: any): boolean {
   const tenantId = readMqttTenantIdMain(db);
   const machineId = readSettingMain(db, 'cloud_machine_id');
   const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
-  const accessToken = readSettingMain(db, 'cloud_access_token');
-  if (
-    !host?.trim() ||
-    !tenantId ||
-    !machineId?.trim() ||
-    !apiBaseUrl?.trim() ||
-    !accessToken?.trim()
-  ) {
+  const accessToken = readSecretSetting(db, 'cloud_access_token');
+  const realtimeChannel = readSettingMain(db, 'cloud_realtime_channel');
+  const clientId = readSettingMain(db, 'mqtt_cloud_client_id');
+  if (!tenantId || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
     return false;
   }
-  const port = portStr ? parseInt(portStr, 10) : 1883;
-  const clientId = readSettingMain(db, 'mqtt_cloud_client_id');
-  const username = readSettingMain(db, 'mqtt_cloud_username');
-  const password = readSettingMain(db, 'mqtt_cloud_password');
-  // Prefer the stored flag; fall back to inferring TLS from the standard
-  // secure MQTT port so machines paired before the flag existed still recover.
-  const tlsSetting = readSettingMain(db, 'mqtt_cloud_tls');
-  const tls = tlsSetting === '1' || (tlsSetting == null && port === 8883);
   try {
     syncService.init(db);
     syncService.connect({
-      host: host.trim(),
-      port: Number.isFinite(port) && port > 0 ? port : 1883,
-      tls,
-      merchantId: tenantId,
+      tenantId,
       machineId: machineId.trim(),
       apiBaseUrl: apiBaseUrl.trim(),
       accessToken: accessToken.trim(),
-      clientId: clientId || undefined,
-      username: username || undefined,
-      password: password || undefined,
+      realtimeChannel: realtimeChannel?.trim() || undefined,
+      clientId: clientId?.trim() || undefined,
     });
-    console.log('[Cloud] MQTT reconnect attempted from stored settings');
+    console.log('[Cloud] Ably reconnect attempted from stored settings');
     return true;
   } catch (e) {
-    console.error('[Cloud] MQTT reconnect from DB failed:', e);
+    console.error('[Cloud] Ably reconnect from DB failed:', e);
     return false;
   }
 }
 
 /**
- * Restore MQTT from SQLite after restart (`sync-connect` runs only during pairing).
+ * Restore Ably from SQLite after restart (`sync-connect` runs only during pairing).
  * If tenant id is missing locally, backfill once from GET /machines/me (no polling).
  */
 function backfillTenantIdFromCloudOnce(db: any): void {
@@ -1025,7 +994,7 @@ function backfillTenantIdFromCloudOnce(db: any): void {
     }
     const tenantId = readMqttTenantIdMain(db);
     if (tenantId) {
-      _doConnectMqttFromSettings(db);
+      _doConnectRealtimeFromSettings(db);
       return;
     }
     if (!cloudTenantMissingLogged) {
@@ -1037,13 +1006,12 @@ function backfillTenantIdFromCloudOnce(db: any): void {
   });
 }
 
-function tryReconnectCloudMqttFromDb(db: any): void {
+function tryReconnectCloudRealtimeFromDb(db: any): void {
   if (!isCloudSyncEnabledMain(db)) return;
-  const host = readSettingMain(db, 'mqtt_cloud_host');
   const machineId = readSettingMain(db, 'cloud_machine_id');
   const apiBaseUrl = readSettingMain(db, 'cloud_api_base');
-  const accessToken = readSettingMain(db, 'cloud_access_token');
-  if (!host?.trim() || !machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
+  const accessToken = readSecretSetting(db, 'cloud_access_token');
+  if (!machineId?.trim() || !apiBaseUrl?.trim() || !accessToken?.trim()) {
     return;
   }
 
@@ -1053,22 +1021,18 @@ function tryReconnectCloudMqttFromDb(db: any): void {
     return;
   }
 
-  // Always refresh broker endpoint + credentials from /machines/me before
-  // connecting so server-side auth mode changes propagate without re-pairing.
-  refreshBrokerDetailsThenConnect(db);
+  refreshRealtimeDetailsThenConnect(db);
 }
 
 /**
- * One-shot GET /machines/me to refresh broker host/port/TLS/credentials, then
- * connect. Falls back to connecting from stored settings if the request fails
- * (e.g. offline), so a transient network error never blocks reconnection.
+ * One-shot GET /machines/me to refresh Ably channel metadata, then connect.
  */
-function refreshBrokerDetailsThenConnect(db: any): void {
+function refreshRealtimeDetailsThenConnect(db: any): void {
   try {
     syncService.init(db);
   } catch (e) {
-    console.warn('[Cloud] sync init before broker refresh failed:', e);
-    _doConnectMqttFromSettings(db);
+    console.warn('[Cloud] sync init before realtime refresh failed:', e);
+    _doConnectRealtimeFromSettings(db);
     return;
   }
   syncService.cloudJson('GET', '/machines/me', null, (err, _status, data) => {
@@ -1076,12 +1040,12 @@ function refreshBrokerDetailsThenConnect(db: any): void {
       try {
         persistMachineContextMain(db, parseMachineMeResponse(data));
       } catch (e) {
-        console.warn('[Cloud] failed to persist broker refresh:', e);
+        console.warn('[Cloud] failed to persist realtime refresh:', e);
       }
     } else if (err) {
-      console.warn('[Cloud] broker refresh failed, using stored settings:', err.message);
+      console.warn('[Cloud] realtime refresh failed, using stored settings:', err.message);
     }
-    _doConnectMqttFromSettings(db);
+    _doConnectRealtimeFromSettings(db);
   });
 }
 
@@ -4179,7 +4143,7 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
     const put = (k: string, v: string) =>
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, v);
     if (config.apiBaseUrl) put('cloud_api_base', String(config.apiBaseUrl));
-    if (config.accessToken) put('cloud_access_token', String(config.accessToken));
+    if (config.accessToken) writeSecretSetting(db, 'cloud_access_token', String(config.accessToken));
     if (config.machineId) put('cloud_machine_id', String(config.machineId));
     if (config.machineCode) put('cloud_machine_code', String(config.machineCode));
     const tenantId = String(config.tenantId ?? config.merchantId ?? '').trim();
@@ -4192,29 +4156,18 @@ ipcMain.handle('sync-connect', async (_event, config: any) => {
       put('cloud_shop_id', String(config.shopId));
     }
     put('cloud_sync_enabled', '1');
-    if (config.host) put('mqtt_cloud_host', String(config.host));
-    if (config.port != null) put('mqtt_cloud_port', String(config.port));
-    const tls =
-      config.tls === true || config.mqttTls === true || Number(config.port) === 8883;
-    put('mqtt_cloud_tls', tls ? '1' : '0');
-    if (config.clientId != null && config.clientId !== '')
-      put('mqtt_cloud_client_id', String(config.clientId));
-    if (config.username != null && config.username !== '')
-      put('mqtt_cloud_username', String(config.username));
-    if (config.password != null && config.password !== '')
-      put('mqtt_cloud_password', String(config.password));
+    // Fresh pairing: full catalog pull (no stale delta watermark from a prior machine).
+    db.prepare("DELETE FROM settings WHERE key = 'cloud_last_sync'").run();
+    if (config.realtimeChannel) put('cloud_realtime_channel', String(config.realtimeChannel));
+    if (config.mqttClientId) put('mqtt_cloud_client_id', String(config.mqttClientId));
 
     syncService.connect({
-      host: String(config.host),
-      port: Number(config.port) || 1883,
-      tls,
-      merchantId: tenantId || String(config.merchantId || ''),
+      tenantId,
       machineId: String(config.machineId),
       apiBaseUrl: String(config.apiBaseUrl),
       accessToken: String(config.accessToken),
-      clientId: config.clientId,
-      username: config.username,
-      password: config.password,
+      realtimeChannel: config.realtimeChannel ? String(config.realtimeChannel) : undefined,
+      clientId: config.mqttClientId ? String(config.mqttClientId) : undefined,
     });
     return { success: true };
   } catch (error: any) {
@@ -4228,11 +4181,6 @@ ipcMain.handle('sync-disconnect', async () => {
     syncService.disconnect();
     const db = getDatabaseMain();
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cloud_sync_enabled', '0')").run();
-    const clear = (key: string) =>
-      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, '');
-    clear('mqtt_cloud_client_id');
-    clear('mqtt_cloud_username');
-    clear('mqtt_cloud_password');
     return { success: true };
   } catch (error: any) {
     console.error('[IPC] sync-disconnect error:', error);
@@ -4243,7 +4191,7 @@ ipcMain.handle('sync-disconnect', async () => {
 /**
  * Hard reset of cloud pairing. Used by the onboarding "Re-pair this register"
  * flow when the operator wants to bind this machine to a different shop or
- * fix an incorrect pairing. Disconnects MQTT, wipes all cloud_* / mqtt_cloud_*
+ * fix an incorrect pairing. Disconnects Ably, wipes cloud_* settings, and clears
  * settings, and clears the local pos_users roster so the next pairing pulls a
  * fresh roster for the new shop.
  */
@@ -4251,8 +4199,13 @@ ipcMain.handle('cloud-unpair', async () => {
   try {
     syncService.disconnect();
     const db = getDatabaseMain();
-    const clear = (key: string) =>
+    const clear = (key: string) => {
+      if (isSecretSettingKey(key)) {
+        clearSecretSetting(db, key);
+        return;
+      }
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, '');
+    };
     const cloudKeys = [
       'cloud_sync_enabled',
       'cloud_api_base',
@@ -4262,6 +4215,7 @@ ipcMain.handle('cloud-unpair', async () => {
       'cloud_tenant_id',
       'cloud_merchant_id',
       'cloud_shop_id',
+      'cloud_realtime_channel',
       'mqtt_cloud_host',
       'mqtt_cloud_port',
       'mqtt_cloud_tls',

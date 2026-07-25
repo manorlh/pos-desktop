@@ -217,13 +217,9 @@ interface ElectronAPI {
         merchantId: string;
         shopId: string;
         accessToken: string;
-        mqttClientId: string;
-        mqttUsername: string;
-        mqttPassword: string;
         machineCode: string;
-        mqttHost: string;
-        mqttPort: number;
-        mqttTls?: boolean;
+        realtimeChannel?: string;
+        tenantId?: string;
       }
     | { success: false; error: string; statusCode?: number }
   >;
@@ -251,15 +247,11 @@ interface ElectronAPI {
         apiBaseUrl?: string;
         machineId?: string;
         merchantId?: string;
+        tenantId?: string;
         shopId?: string;
         accessToken?: string;
-        mqttClientId?: string;
-        mqttUsername?: string;
-        mqttPassword?: string;
         machineCode?: string;
-        mqttHost?: string;
-        mqttPort?: number;
-        mqttTls?: boolean;
+        realtimeChannel?: string;
         error?: string;
       }
     | { success: false; error: string; statusCode?: number }
@@ -272,15 +264,10 @@ interface ElectronAPI {
     merchantId?: string;
     shopId?: string;
     machineCode?: string;
-    host: string;
-    port: number;
-    tls?: boolean;
-    clientId?: string;
-    username?: string;
-    password?: string;
+    realtimeChannel?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   syncDisconnect: () => Promise<{ success: boolean; error?: string }>;
-  /** Hard reset of cloud pairing: disconnects MQTT, wipes cloud_* settings, and clears local pos_users. */
+  /** Hard reset of cloud pairing: disconnects Ably, wipes cloud_* settings, and clears local pos_users. */
   cloudUnpair: () => Promise<{ success: boolean; error?: string }>;
   syncGetStatus: () => Promise<
     { success: true; status: { enabled: boolean; connected: boolean; pendingCount: number; lastSyncedAt: string | null } } | { success: false; error?: string }
