@@ -11,7 +11,7 @@ import { imageCacheService } from './imageCacheService';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { URL } = require('url');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { BrowserWindow } = require('electron');
+const { app, BrowserWindow } = require('electron');
 
 export interface SyncQueueRow {
   id: string;
@@ -191,7 +191,7 @@ export class SyncService {
     this.cloudJson(
       'POST',
       '/machines/me/heartbeat',
-      { mqttConnected: cloudAblyClient.connected },
+      { mqttConnected: cloudAblyClient.connected, appVersion: app.getVersion() },
       (err) => {
         if (err) console.warn('[Sync] HTTP heartbeat failed:', err.message);
       },

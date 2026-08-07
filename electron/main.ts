@@ -2268,6 +2268,7 @@ async function waitForPrintReady(printWindow: BrowserWindow): Promise<number> {
 async function printHtmlToPrinter(
   html: string,
   printerName?: string,
+  options?: { drawerKickOnly?: boolean },
 ): Promise<{ success: boolean; printed?: boolean; error?: string }> {
   if (!win) {
     return { success: false, error: 'Application window not ready' };
@@ -2303,18 +2304,25 @@ async function printHtmlToPrinter(
     // and when no explicit pageSize is supplied (the print job ends up with an
     // empty content/page size). Wait for fonts + images, then measure the
     // rendered content so we can pass a concrete pageSize below.
-    const contentHeightPx = await waitForPrintReady(printWindow);
+    const contentHeightPx = options?.drawerKickOnly
+      ? 1
+      : await waitForPrintReady(printWindow);
 
     // Page width = printable width; the HTML keeps text within it via padding.
     // A small height buffer avoids the last line being pushed to a second page
     // by sub-pixel rounding.
     const MICRONS_PER_MM = 1000;
     const MICRONS_PER_PX = 25400 / 96; // 1px = 1/96in, 1in = 25400µm
-    const HEIGHT_BUFFER_MICRONS = Math.round(2 * MICRONS_PER_MM);
+    const HEIGHT_BUFFER_MICRONS = options?.drawerKickOnly
+      ? 0
+      : Math.round(2 * MICRONS_PER_MM);
     const pageWidthMicrons = Math.round(THERMAL_PAGE_WIDTH_MM * MICRONS_PER_MM);
+    const minPageHeightMicrons = options?.drawerKickOnly
+      ? Math.round(2 * MICRONS_PER_MM)
+      : Math.round(40 * MICRONS_PER_MM);
     const pageHeightMicrons = Math.max(
       Math.round((contentHeightPx || 0) * MICRONS_PER_PX) + HEIGHT_BUFFER_MICRONS,
-      Math.round(40 * MICRONS_PER_MM),
+      minPageHeightMicrons,
     );
 
     const printOptions: Record<string, unknown> = {
@@ -2374,16 +2382,12 @@ async function printHtmlToDefaultPrinter(html: string) {
 
 const INTEGRATION_LOG_TYPE_DRAWER = 'cash_drawer';
 
-function buildDrawerKickHtml(cashierName: string, language: 'he' | 'en'): string {
-  const title = language === 'he' ? 'פתיחת מגירה' : 'Cash drawer open';
-  const when = new Date().toLocaleString(language === 'he' ? 'he-IL' : 'en-IL');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 12px; font-size: 12pt; }
-  </style></head><body>
-    <p><strong>${title}</strong></p>
-    <p>${cashierName}</p>
-    <p>${when}</p>
-  </body></html>`;
+/** Blank page — triggers drawer kick on many thermal drivers without a visible slip. */
+const DRAWER_KICK_HTML =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:1px;height:1px;overflow:hidden;visibility:hidden;}</style></head><body></body></html>';
+
+async function kickCashDrawer(printerName: string): Promise<{ success: boolean; printed?: boolean; error?: string }> {
+  return printHtmlToPrinter(DRAWER_KICK_HTML, printerName, { drawerKickOnly: true });
 }
 
 ipcMain.handle('print-receipt', async (_event, payload: ReceiptPrintPayload & { printerName?: string }) => {
@@ -2408,7 +2412,6 @@ ipcMain.handle(
     const db = getDatabaseMain();
     const printerName = (payload?.printerName || '').trim();
     const cashierName = (payload?.cashierName || '').trim() || 'Cashier';
-    const language = payload?.language === 'en' ? 'en' : 'he';
 
     if (!printerName) {
       const err = 'Drawer printer not configured';
@@ -2426,8 +2429,7 @@ ipcMain.handle(
       return { success: false, error: err };
     }
 
-    const html = buildDrawerKickHtml(cashierName, language);
-    const result = await printHtmlToPrinter(html, printerName);
+    const result = await kickCashDrawer(printerName);
     try {
       insertIntegrationLog(db, {
         type: INTEGRATION_LOG_TYPE_DRAWER,
